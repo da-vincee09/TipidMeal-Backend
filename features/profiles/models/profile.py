@@ -1,8 +1,17 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
 import uuid
-from sqlalchemy import String, Integer, Numeric, Text, DateTime
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import String, Numeric, Text, DateTime, Date
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from shared.database.base import Base
+from datetime import date
+
+if TYPE_CHECKING:
+    from .food_allergy import FoodAllergy
+
+if TYPE_CHECKING:
+    from .disliked_ingredient import DislikedIngredient
 
 class Profile(Base):
     __tablename__="profiles"
@@ -10,8 +19,6 @@ class Profile(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
         default=uuid.uuid4,
-        unique=True,
-        nullable=False
     )
 
     auth_id: Mapped[uuid.UUID] = mapped_column(
@@ -35,8 +42,8 @@ class Profile(Base):
         nullable=False
     )
 
-    age: Mapped[int] = mapped_column(
-        Integer,
+    date_of_birth: Mapped[date] = mapped_column(
+        Date,
         nullable=False
     )
 
@@ -55,14 +62,14 @@ class Profile(Base):
         nullable=False
     )
 
-    food_allergies: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True
+    food_allergies: Mapped[list["FoodAllergy"]] = relationship(
+        back_populates="profile",
+        cascade="all, delete-orphan",
     )
 
-    disliked_ingredients: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True
+    disliked_ingredients: Mapped[list["DislikedIngredient"]] = relationship(
+        back_populates="profile",
+        cascade="all, delete-orphan",
     )
 
     created_at: Mapped[DateTime] = mapped_column(

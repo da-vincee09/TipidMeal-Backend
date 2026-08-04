@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ConfigDict
@@ -17,10 +17,7 @@ class ProfileCreate(BaseModel):
         max_length=100
     )
 
-    age: int = Field(
-        ge=13,
-        le=120
-    )
+    date_of_birth: date
 
     sex: str
 
@@ -30,9 +27,8 @@ class ProfileCreate(BaseModel):
 
     cooking_skill_level: str
 
-    food_allergies: str | None = None
-
-    disliked_ingredients: str | None = None
+    food_allergies: list[str] = Field(default_factory=list)
+    disliked_ingredients: list[str] = Field(default_factory=list)
 
 
 # Used when updating a profile
@@ -51,11 +47,7 @@ class ProfileUpdate(BaseModel):
         max_length=100
     )
 
-    age: int | None = Field(
-        default=None,
-        ge=13,
-        le=120
-    )
+    date_of_birth: date | None = None
 
     sex: str | None = None
 
@@ -66,10 +58,26 @@ class ProfileUpdate(BaseModel):
 
     cooking_skill_level: str | None = None
 
-    food_allergies: str | None = None
+    food_allergies: list[str] | None = None
+    disliked_ingredients: list[str] | None = None
 
-    disliked_ingredients: str | None = None
 
+class FoodAllergyResponse(BaseModel):
+    id: UUID
+    allergy: str
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )
+
+
+class DislikedIngredientResponse(BaseModel):
+    id: UUID
+    ingredient: str
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )
 
 # Returned by API
 class ProfileResponse(BaseModel):
@@ -81,15 +89,15 @@ class ProfileResponse(BaseModel):
     first_name: str
     last_name: str
 
-    age: int
+    date_of_birth: date
     sex: str
 
     daily_budget: float
 
     cooking_skill_level: str
 
-    food_allergies: str | None
-    disliked_ingredients: str | None
+    food_allergies: list[FoodAllergyResponse]
+    disliked_ingredients: list[DislikedIngredientResponse]
 
     created_at: datetime
     updated_at: datetime
@@ -98,3 +106,4 @@ class ProfileResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True
     )
+

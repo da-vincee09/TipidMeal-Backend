@@ -14,6 +14,7 @@ router = APIRouter(
     tags=["Profiles"],
 )
 
+
 @router.post(
     "", 
     response_model=ProfileResponse,
@@ -30,6 +31,7 @@ def create_profile(
         current_user,
     )
 
+
 @router.get(
     "/me",
     response_model=ProfileResponse,
@@ -42,6 +44,7 @@ def get_profile(
         db,
         current_user,
     )
+
 
 @router.put(
     "/me",
