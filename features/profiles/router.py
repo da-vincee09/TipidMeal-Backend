@@ -6,7 +6,8 @@ from features.profiles.schemas import (
     ProfileResponse,
     ProfileUpdate
 )
-from core.dependencies import get_db, get_current_user
+from core.dependencies import get_db
+from shared.auth.dependencies import get_current_user
 from sqlalchemy.orm import Session
 
 router = APIRouter(
@@ -40,7 +41,7 @@ def get_profile(
     current_user: UUID = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return service.get_profile(
+    return service.get_profile_by_auth_id(
         db,
         current_user,
     )
@@ -55,9 +56,22 @@ def update_profile(
     current_user: UUID = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return service.update_profile(
+    profile = service.get_profile_by_auth_id(
         db,
         current_user,
+    )
+
+    if profile is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=404,
+            detail="Profile not found",
+        )
+
+    return service.update_profile(
+        db,
+        profile,
         profile_data,
     )
 

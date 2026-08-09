@@ -8,9 +8,7 @@ class Settings(BaseSettings):
     TIMEZONE: str = "Asia/Manila"
 
     DATABASE_URL: str
-
-    SUPABASE_JWT_SECRET: str
-    JWT_ALGORITHM: str = "HS256"
+    SUPABASE_URL: str
 
     model_config = SettingsConfigDict(
         env_file=".env",

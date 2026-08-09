@@ -2,45 +2,70 @@
 
 Backend API for **TipidMeal**, a mobile application that helps users discover affordable, personalized meal recommendations based on their budget, cooking skills, dietary preferences, and available ingredients.
 
-Built with **FastAPI**, **SQLAlchemy**, and **Supabase PostgreSQL**.
+Built with **FastAPI**, **SQLAlchemy 2.0**, and **Supabase PostgreSQL**.
 
 ---
 
 ## 🚀 Tech Stack
 
-- **FastAPI** – REST API framework
-- **SQLAlchemy 2.0** – ORM
-- **PostgreSQL (Supabase)** – Database
-- **Supabase Auth** – User authentication
-- **Supabase Storage** – Profile image storage
-- **Pydantic v2** – Data validation
-- **JWT** – Token verification
-- **Alembic** *(planned)* – Database migrations
+* **FastAPI** – REST API framework
+* **SQLAlchemy 2.0** – ORM
+* **PostgreSQL (Supabase)** – Database
+* **Supabase Auth** – User authentication
+* **Supabase Storage** – Profile image storage
+* **Pydantic v2** – Data validation
+* **JWT / JWKS** – Supabase access-token verification
+* **Alembic** – Database migrations
+* **python-jose** – JWT verification
 
 ---
 
 ## 📁 Project Structure
 
-```
+```text
 backend/
 │
+├── app/
+│   ├── api/
+│   │   └── router.py
+│   └── main.py
+│
 ├── core/
+│   ├── config.py
 │   ├── database.py
-│   ├── dependencies.py
-│   └── security.py
+│   └── dependencies.py
 │
 ├── features/
 │   └── profiles/
-│       ├── models.py
+│       ├── models/
+│       │   ├── __init__.py
+│       │   ├── profile.py
+│       │   ├── food_allergy.py
+│       │   └── disliked_ingredient.py
 │       ├── schemas.py
 │       ├── repository.py
 │       ├── service.py
 │       └── router.py
 │
 ├── shared/
-│   └── database/
+│   ├── auth/
+│   │   ├── __init__.py
+│   │   ├── jwt.py
+│   │   └── dependencies.py
+│   │
+│   ├── database/
+│   │   ├── base.py
+│   │   └── models.py
+│   │
+│   ├── responses/
+│   │   └── base_reponse.py
+│   │
+│   └── schemas/
+│       └── pagination.py
 │
-├── main.py
+├── alembic/
+│   └── versions/
+│
 ├── requirements.txt
 └── .env
 ```
@@ -53,108 +78,173 @@ backend/
 
 Authentication is handled by **Supabase Auth**.
 
-The backend verifies JWT access tokens before allowing access to protected endpoints.
+FastAPI verifies Supabase access tokens using Supabase's **JWKS endpoint** and the current **ES256 / P-256** signing key.
 
 Implemented:
 
-- JWT verification
-- Current user dependency
-- Protected API routes
+* Supabase JWT verification
+* JWKS public-key retrieval
+* ES256 signature verification
+* Current authenticated-user dependency
+* Protected API routes
+* Authentication failure handling
+
+Authentication flow:
+
+```text
+Supabase Auth
+      ↓
+JWT Access Token
+      ↓
+FastAPI
+      ↓
+JWKS Public Key
+      ↓
+ES256 Verification
+      ↓
+Authenticated Supabase User UUID
+```
+
+> Flutter-side Supabase authentication has not yet been connected to the backend. The backend is prepared to receive and verify the access token.
 
 ---
 
-### Profile Module
+## 👤 Profile Module
 
-Implemented CRUD operations for user profiles.
+The profile module provides the application's initial user-profile functionality.
 
-Fields:
+Profile fields include:
 
-- Profile Image URL
-- First Name
-- Last Name
-- Age
-- Sex
-- Daily Budget
-- Cooking Skill Level
-- Food Allergies
-- Disliked Ingredients
+* Profile Image URL
+* First Name
+* Last Name
+* Date of Birth
+* Sex
+* Daily Budget
+* Cooking Skill Level
+* Food Allergies
+* Disliked Ingredients
 
-Implemented layers:
+The profile module follows a layered architecture:
 
-- SQLAlchemy Model
-- Pydantic Schemas
-- Repository
-- Service
-- Router
+```text
+Router
+  ↓
+Service
+  ↓
+Repository
+  ↓
+SQLAlchemy Models
+  ↓
+PostgreSQL
+```
+
+Implemented:
+
+* SQLAlchemy models
+* Pydantic schemas
+* Repository layer
+* Service layer
+* API router
+* Profile relationships
+* Profile creation
+* Profile retrieval
+* Profile updates
 
 ---
 
 ## 🔐 Protected Endpoints
 
-| Method | Endpoint | Description |
-|---------|----------|-------------|
-| POST | `/profiles` | Create user profile |
-| GET | `/profiles/me` | Retrieve current user's profile |
-| PUT | `/profiles/me` | Update current user's profile |
+| Method | Endpoint              | Description                               |
+| ------ | --------------------- | ----------------------------------------- |
+| POST   | `/api/v1/profiles`    | Create the authenticated user's profile   |
+| GET    | `/api/v1/profiles/me` | Retrieve the authenticated user's profile |
+| PUT    | `/api/v1/profiles/me` | Update the authenticated user's profile   |
 
 Authentication is required using:
 
-```
+```text
 Authorization: Bearer <Supabase Access Token>
+```
+
+Unauthenticated requests are rejected with:
+
+```text
+401 Unauthorized
 ```
 
 ---
 
 ## 🗄 Database
 
-Database Provider:
+Database provider:
 
-- Supabase PostgreSQL
+* **Supabase PostgreSQL**
 
-Current Tables:
+Current application tables include:
 
-- profiles
+* `profiles`
+* `food_allergies`
+* `disliked_ingredients`
 
-Implemented:
+The profile relationships are structured as:
 
-- SQLAlchemy Models
-- Relationships ready for expansion
-- Row Level Security (RLS)
-- Protected profile access
+```text
+profiles
+   │
+   ├── food_allergies
+   │
+   └── disliked_ingredients
+```
+
+Both related tables reference `profiles.id` and use cascading deletion.
+
+The `profiles.auth_id` field stores the authenticated Supabase user's UUID.
+
+### Database migrations
+
+Database schema changes are managed using **Alembic**.
+
+Implemented migrations include:
+
+* Profile schema updates
+* Food allergies table
+* Disliked ingredients table
+* Related foreign keys and indexes
 
 ---
 
 ## 🖼 Profile Images
 
-Profile images are stored using **Supabase Storage**.
+Profile images are intended to be stored using **Supabase Storage**.
 
-Current implementation:
+Planned flow:
 
-- Storage bucket
-- Storage policies
-- Image URL stored inside the `profiles` table
-
-Flow:
-
-```
+```text
 Flutter
     ↓
 Upload Image
     ↓
 Supabase Storage
     ↓
-Receive Public URL
+Receive Image URL
+    ↓
+FastAPI
     ↓
 PUT /profiles/me
     ↓
 Store URL in PostgreSQL
 ```
 
+The `profile_image_url` field is already supported by the profile model and schemas.
+
 ---
 
 ## 📌 Current API Flow
 
-```
+The intended complete application flow is:
+
+```text
 Flutter
       ↓
 Supabase Auth
@@ -167,38 +257,41 @@ JWT Verification
       ↓
 Current User Dependency
       ↓
-Service Layer
+Profile Service
       ↓
-Repository Layer
+Repository
       ↓
 Supabase PostgreSQL
 ```
+
+The backend authentication layer is already prepared for this flow.
 
 ---
 
 ## 🚧 Planned Features
 
-- Pantry Management
-- Ingredient Inventory
-- AI Meal Recommendation Engine
-- Weekly Meal Planner
-- Grocery List Generator
-- Saved Meals
-- Favorites
-- Nutrition Information
-- Admin Module
+* Flutter Supabase authentication integration
+* Pantry Management
+* Ingredient Inventory
+* AI Meal Recommendation Engine
+* Weekly Meal Planner
+* Grocery List Generator
+* Saved Meals
+* Favorites
+* Nutrition Information
+* Admin Module
 
 ---
 
-## ⚙ Installation
+## ⚙️ Installation
 
-Clone the repository.
+Clone the repository:
 
 ```bash
 git clone https://github.com/<username>/TipidMeal-Backend.git
 ```
 
-Create a virtual environment.
+Create a virtual environment:
 
 ```bash
 python -m venv venv
@@ -212,7 +305,7 @@ Windows:
 venv\Scripts\activate
 ```
 
-Install dependencies.
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -223,30 +316,44 @@ Create a `.env` file.
 Example:
 
 ```env
+PROJECT_NAME=TipidMeal API
+PROJECT_VERSION=1.0.0
+API_V1_PREFIX=/api/v1
+DEBUG=True
+TIMEZONE=Asia/Manila
+
 DATABASE_URL=your_database_url
-SUPABASE_JWT_SECRET=your_jwt_secret
-JWT_ALGORITHM=HS256
+
+SUPABASE_URL=https://your-project.supabase.co
 ```
 
-Run the server.
+The backend retrieves Supabase's public JWT signing keys from:
+
+```text
+https://your-project.supabase.co/auth/v1/.well-known/jwks.json
+```
+
+> Do not commit `.env` or any Supabase secrets to the repository.
+
+Run the server:
 
 ```bash
-uvicorn main:app --reload
+uvicorn app.main:app --reload
 ```
 
 ---
 
 ## 📖 API Documentation
 
-Swagger UI
+Swagger UI:
 
-```
+```text
 http://127.0.0.1:8000/docs
 ```
 
-ReDoc
+ReDoc:
 
-```
+```text
 http://127.0.0.1:8000/redoc
 ```
 
