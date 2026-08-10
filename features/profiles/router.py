@@ -1,5 +1,5 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from features.profiles import service
 from features.profiles.schemas import (
     ProfileCreate,
@@ -41,10 +41,18 @@ def get_profile(
     current_user: UUID = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return service.get_profile_by_auth_id(
+    profile = service.get_profile_by_auth_id(
         db,
         current_user,
     )
+
+    if profile is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Profile not found",
+        )
+
+    return profile
 
 
 @router.put(
@@ -62,7 +70,6 @@ def update_profile(
     )
 
     if profile is None:
-        from fastapi import HTTPException
 
         raise HTTPException(
             status_code=404,
