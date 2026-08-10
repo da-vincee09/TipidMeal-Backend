@@ -17,6 +17,7 @@ Built with **FastAPI**, **SQLAlchemy 2.0**, and **Supabase PostgreSQL**.
 * **JWT / JWKS** – Supabase access-token verification
 * **Alembic** – Database migrations
 * **python-jose** – JWT verification
+* **python-multipart** – Multipart/form-data parsing, required for the profile image upload endpoint
 
 ---
 
@@ -56,6 +57,9 @@ backend/
 │   ├── database/
 │   │   ├── base.py
 │   │   └── models.py
+│   │
+│   ├── storage/
+│   │   └── supabase_storage.py
 │   │
 │   ├── responses/
 │   │   └── base_reponse.py
@@ -105,13 +109,13 @@ ES256 Verification
 Authenticated Supabase User UUID
 ```
 
-> Flutter-side Supabase authentication has not yet been connected to the backend. The backend is prepared to receive and verify the access token.
+> The Flutter app is now fully connected to this backend — login, signup, and every profile operation (including image upload) route through the Supabase-token-verified endpoints below.
 
 ---
 
 ## 👤 Profile Module
 
-The profile module provides the application's initial user-profile functionality.
+The profile module provides the application's user-profile functionality, including profile pictures.
 
 Profile fields include:
 
@@ -139,6 +143,17 @@ SQLAlchemy Models
 PostgreSQL
 ```
 
+Image uploads follow a parallel, separate path that doesn't go through the repository/service layers used for the rest of the profile, since it's a file operation against Supabase Storage rather than a database write:
+
+```text
+Router (POST /profiles/me/image)
+  ↓
+shared/storage/supabase_storage.py  →  Supabase Storage (REST API,
+  ↓                                      service-role key, public bucket)
+Profile row updated directly with the
+returned public URL, then committed
+```
+
 Implemented:
 
 * SQLAlchemy models
@@ -150,16 +165,18 @@ Implemented:
 * Profile creation
 * Profile retrieval
 * Profile updates
+* **Profile picture upload**, storage, and persistence
 
 ---
 
 ## 🔐 Protected Endpoints
 
-| Method | Endpoint              | Description                               |
-| ------ | --------------------- | ----------------------------------------- |
-| POST   | `/api/v1/profiles`    | Create the authenticated user's profile   |
-| GET    | `/api/v1/profiles/me` | Retrieve the authenticated user's profile |
-| PUT    | `/api/v1/profiles/me` | Update the authenticated user's profile   |
+| Method | Endpoint                     | Description                                          |
+| ------ | ----------------------------- | ----------------------------------------------------- |
+| POST   | `/api/v1/profiles`            | Create the authenticated user's profile               |
+| GET    | `/api/v1/profiles/me`         | Retrieve the authenticated user's profile              |
+| PUT    | `/api/v1/profiles/me`         | Update the authenticated user's profile                |
+| POST   | `/api/v1/profiles/me/image`   | Upload/replace the authenticated user's profile picture |
 
 Authentication is required using:
 
@@ -172,6 +189,13 @@ Unauthenticated requests are rejected with:
 ```text
 401 Unauthorized
 ```
+
+`POST /profiles/me/image` additionally requires that a profile already exists for the authenticated user — it returns `404 Not Found` otherwise, since there is no profile row yet to attach the image URL to. On the client, this endpoint is only called as a follow-up step, after `POST /profiles` or `PUT /profiles/me` has already succeeded.
+
+The image endpoint also validates:
+
+* **Content type** — only `image/jpeg`, `image/png`, `image/webp` are accepted (`422 Unprocessable Entity` otherwise)
+* **File size** — 5 MB maximum, matching the Supabase Storage bucket's own limit (`422` otherwise)
 
 ---
 
@@ -216,33 +240,44 @@ Implemented migrations include:
 
 ## 🖼 Profile Images
 
-Profile images are intended to be stored using **Supabase Storage**.
+Profile images are stored using **Supabase Storage**, in a **public** bucket named `profile-images` (5 MB limit, `image/jpeg` / `image/png` / `image/webp` only — enforced both by the bucket configuration and by the API).
 
-Planned flow:
+Actual implemented flow:
 
 ```text
 Flutter
     ↓
-Upload Image
+Pick image locally (image_picker) — no upload yet
     ↓
-Supabase Storage
+Submit profile form → POST /profiles or PUT /profiles/me
     ↓
-Receive Image URL
+On success, upload the picked image:
+    POST /profiles/me/image  (multipart/form-data)
     ↓
-FastAPI
+FastAPI → shared/storage/supabase_storage.py
     ↓
-PUT /profiles/me
+Supabase Storage REST API (raw `requests` call, authenticated
+with the service-role key — no supabase-py client dependency,
+consistent with how shared/auth/jwt.py talks to Supabase's
+JWKS endpoint directly)
     ↓
-Store URL in PostgreSQL
+Object written to the profile-images bucket at "{auth_id}.{ext}"
+(one object per user; re-uploads overwrite via x-upsert)
+    ↓
+Public URL constructed and saved onto the profile row
+    ↓
+{"profile_image_url": "..."} returned to Flutter
 ```
 
-The `profile_image_url` field is already supported by the profile model and schemas.
+The upload is deliberately a **separate endpoint** from profile create/update, not combined multipart handling on those routes — this keeps `POST /profiles` and `PUT /profiles/me` as plain JSON endpoints, and lets the client treat a failed image upload as non-fatal (the rest of the profile is already saved) rather than needing to retry the whole form.
+
+The `profile_image_url` field is supported by the profile model and schemas, and is populated automatically by the upload endpoint — no separate client-side step is needed to persist the URL.
 
 ---
 
 ## 📌 Current API Flow
 
-The intended complete application flow is:
+The complete, connected application flow is:
 
 ```text
 Flutter
@@ -253,24 +288,25 @@ JWT Access Token
       ↓
 FastAPI
       ↓
-JWT Verification
+JWT Verification (JWKS / ES256)
       ↓
 Current User Dependency
       ↓
-Profile Service
-      ↓
-Repository
-      ↓
-Supabase PostgreSQL
+Profile Service  ──────────────┐
+      ↓                        │
+Repository                     │ (image uploads only)
+      ↓                        ▼
+Supabase PostgreSQL   shared/storage/supabase_storage.py
+                                ↓
+                        Supabase Storage
 ```
 
-The backend authentication layer is already prepared for this flow.
+The backend authentication layer, profile CRUD, and profile image upload are all implemented and connected end-to-end to the Flutter client.
 
 ---
 
 ## 🚧 Planned Features
 
-* Flutter Supabase authentication integration
 * Pantry Management
 * Ingredient Inventory
 * AI Meal Recommendation Engine
@@ -311,6 +347,12 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+If `python-multipart` isn't already listed, install it separately (required for the profile image upload endpoint):
+
+```bash
+pip install python-multipart
+```
+
 Create a `.env` file.
 
 Example:
@@ -325,7 +367,10 @@ TIMEZONE=Asia/Manila
 DATABASE_URL=your_database_url
 
 SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 ```
+
+`SUPABASE_SERVICE_ROLE_KEY` is required for profile image uploads — it authenticates server-side writes to Supabase Storage and bypasses Row Level Security. It is **not** the same as the `anon` key used client-side by the Flutter app, and it must never be exposed to the client or committed to the repository.
 
 The backend retrieves Supabase's public JWT signing keys from:
 
