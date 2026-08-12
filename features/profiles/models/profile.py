@@ -13,6 +13,9 @@ if TYPE_CHECKING:
 if TYPE_CHECKING:
     from .disliked_ingredient import DislikedIngredient
 
+if TYPE_CHECKING:
+     from ...pantry.models.pantry_item import PantryItem
+
 class Profile(Base):
     __tablename__="profiles"
 
@@ -68,6 +71,11 @@ class Profile(Base):
     )
 
     disliked_ingredients: Mapped[list["DislikedIngredient"]] = relationship(
+        back_populates="profile",
+        cascade="all, delete-orphan",
+    )
+
+    pantry_items: Mapped[list["PantryItem"]] = relationship(
         back_populates="profile",
         cascade="all, delete-orphan",
     )

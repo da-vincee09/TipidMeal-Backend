@@ -1,11 +1,10 @@
 from profiles.models.profile import Profile
 from uuid import UUID
-
 from features.profiles.models.food_allergy import FoodAllergy
 from features.profiles.models.disliked_ingredient import DislikedIngredient
 from sqlalchemy.orm import Session, joinedload
-
 from features.profiles.schemas import ProfileCreate, ProfileUpdate
+
 
 def create_profile(
     db: Session,
