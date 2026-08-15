@@ -26,6 +26,7 @@ def create_meal_ingredient(
     ingredient: str,
     quantity: Decimal,
     unit: str,
+    is_optional: bool,
 ):
     meal = repository.get_meal_by_id(
         db,
@@ -44,6 +45,7 @@ def create_meal_ingredient(
         ingredient,
         quantity,
         unit,
+        is_optional,
     )
 
 

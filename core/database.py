@@ -14,3 +14,5 @@ SessionLocal = sessionmaker(
     autoflush=False,
     bind=engine
 )
+
+from shared.database import models

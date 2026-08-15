@@ -40,6 +40,11 @@ class MealIngredient(Base):
         nullable=False,
     )
 
+    is_optional: Mapped[bool] = mapped_column(
+        nullable=False,
+        default=False,
+    )
+
     meal: Mapped["Meal"] = relationship(
         back_populates="ingredients",
     )

@@ -1,8 +1,8 @@
 # TipidMeal Backend
 
-Backend API for **TipidMeal**, a mobile application that helps users discover affordable, personalized meal recommendations based on their budget, cooking skills, dietary preferences, and available ingredients.
+Backend API for **TipidMeal**, a mobile application that helps users discover affordable, personalized meal recommendations based on their budget, cooking skills, dietary restrictions, ingredient preferences, and available pantry ingredients.
 
-Built with **FastAPI**, **SQLAlchemy 2.0**, and **Supabase PostgreSQL**.
+Built with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL (Supabase)**, and **Supabase Auth**.
 
 ---
 
@@ -17,7 +17,7 @@ Built with **FastAPI**, **SQLAlchemy 2.0**, and **Supabase PostgreSQL**.
 * **JWT / JWKS** – Supabase access-token verification
 * **Alembic** – Database migrations
 * **python-jose** – JWT verification
-* **python-multipart** – Multipart/form-data parsing, required for the profile image upload endpoint
+* **python-multipart** – Multipart/form-data parsing for profile image uploads
 
 ---
 
@@ -37,14 +37,46 @@ backend/
 │   └── dependencies.py
 │
 ├── features/
-│   └── profiles/
+│   │
+│   ├── profiles/
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   ├── profile.py
+│   │   │   ├── food_allergy.py
+│   │   │   └── disliked_ingredient.py
+│   │   ├── schemas.py
+│   │   ├── repository.py
+│   │   ├── service.py
+│   │   └── router.py
+│   │
+│   ├── pantry/
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   └── pantry_item.py
+│   │   ├── schemas.py
+│   │   ├── repository.py
+│   │   ├── service.py
+│   │   └── router.py
+│   │
+│   ├── meals/
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   ├── meal.py
+│   │   │   ├── meal_ingredient.py
+│   │   │   └── meal_instruction.py
+│   │   ├── schemas.py
+│   │   ├── repository.py
+│   │   ├── service.py
+│   │   └── router.py
+│   │
+│   └── recommendations/
 │       ├── models/
-│       │   ├── __init__.py
-│       │   ├── profile.py
-│       │   ├── food_allergy.py
-│       │   └── disliked_ingredient.py
+│       │   └── ingredient_substitution.py
 │       ├── schemas.py
-│       ├── repository.py
+│       ├── rules.py
+│       ├── scoring.py
+│       ├── tfidf.py
+│       ├── utils.py
 │       ├── service.py
 │       └── router.py
 │
@@ -62,7 +94,7 @@ backend/
 │   │   └── supabase_storage.py
 │   │
 │   ├── responses/
-│   │   └── base_reponse.py
+│   │   └── base_response.py
 │   │
 │   └── schemas/
 │       └── pagination.py
@@ -76,9 +108,9 @@ backend/
 
 ---
 
-## ✅ Features Implemented
+# ✅ Implemented Features
 
-### Authentication
+## 🔐 Authentication
 
 Authentication is handled by **Supabase Auth**.
 
@@ -109,13 +141,13 @@ ES256 Verification
 Authenticated Supabase User UUID
 ```
 
-> The Flutter app is now fully connected to this backend — login, signup, and every profile operation (including image upload) route through the Supabase-token-verified endpoints below.
+The authenticated Supabase UUID is used as the identity source for application-level data.
 
 ---
 
-## 👤 Profile Module
+# 👤 Profile Module
 
-The profile module provides the application's user-profile functionality, including profile pictures.
+The profile module provides user-profile functionality, including profile pictures and dietary preferences.
 
 Profile fields include:
 
@@ -143,17 +175,6 @@ SQLAlchemy Models
 PostgreSQL
 ```
 
-Image uploads follow a parallel, separate path that doesn't go through the repository/service layers used for the rest of the profile, since it's a file operation against Supabase Storage rather than a database write:
-
-```text
-Router (POST /profiles/me/image)
-  ↓
-shared/storage/supabase_storage.py  →  Supabase Storage (REST API,
-  ↓                                      service-role key, public bucket)
-Profile row updated directly with the
-returned public URL, then committed
-```
-
 Implemented:
 
 * SQLAlchemy models
@@ -161,165 +182,558 @@ Implemented:
 * Repository layer
 * Service layer
 * API router
-* Profile relationships
 * Profile creation
 * Profile retrieval
 * Profile updates
-* **Profile picture upload**, storage, and persistence
+* Food allergy relationships
+* Disliked ingredient relationships
+* Profile picture upload
+* Supabase Storage integration
 
 ---
 
-## 🔐 Protected Endpoints
+# 🥫 Pantry Module
 
-| Method | Endpoint                     | Description                                          |
-| ------ | ----------------------------- | ----------------------------------------------------- |
-| POST   | `/api/v1/profiles`            | Create the authenticated user's profile               |
-| GET    | `/api/v1/profiles/me`         | Retrieve the authenticated user's profile              |
-| PUT    | `/api/v1/profiles/me`         | Update the authenticated user's profile                |
-| POST   | `/api/v1/profiles/me/image`   | Upload/replace the authenticated user's profile picture |
+The pantry module represents the ingredients currently available to an authenticated user.
 
-Authentication is required using:
+Example:
+
+```text
+User Pantry
+
+Rice        2 kg
+Chicken     1 kg
+Eggs        6 pcs
+Tomato      4 pcs
+```
+
+Each pantry item is associated with the user's application profile.
+
+Implemented:
+
+* Pantry item SQLAlchemy model
+* Pantry item schemas
+* Repository layer
+* Service layer
+* API router
+* Authenticated-user ownership
+* Pantry item creation
+* Pantry item retrieval
+* Pantry item updates
+* Pantry item deletion
+* Quantity and unit handling
+
+Pantry architecture:
+
+```text
+Authenticated User
+       ↓
+Profile
+       ↓
+Pantry Items
+       ↓
+PostgreSQL
+```
+
+The pantry is also used as an input to the recommendation system.
+
+---
+
+# 🍽️ Meals Module
+
+The meals module provides the application's meal database.
+
+A meal contains information such as:
+
+* Name
+* Description
+* Image URL
+* Estimated Cost
+* Cooking Time
+* Difficulty
+* Servings
+* Calories
+
+Meals are connected to their ingredients and cooking instructions.
+
+Relationship:
+
+```text
+Meal
+ │
+ ├── Meal Ingredients
+ │
+ └── Meal Instructions
+```
+
+Implemented:
+
+* Meal model
+* Meal ingredient model
+* Meal instruction model
+* Meal schemas
+* Repository layer
+* Service layer
+* API router
+* Meal retrieval
+* Meal detail retrieval
+* Ingredient relationships
+* Instruction relationships
+
+The meal database serves as the source of candidate meals for the recommendation system.
+
+---
+
+# 🤖 Recommendation Module
+
+The recommendation system currently uses a **deterministic, rule-based approach** rather than an external AI API.
+
+This is intentional.
+
+The recommendation pipeline combines:
+
+```text
+Profile
+   +
+Pantry
+   +
+Meals
+   +
+Recommendation Rules
+   ↓
+Scoring
+   ↓
+Ranking
+   ↓
+Recommended Meals
+```
+
+Recommendations consider:
+
+* Ingredient availability
+* Ingredient substitutions
+* Estimated meal cost
+* User daily budget
+* Cooking skill
+* Food allergies
+* Disliked ingredients
+* Ingredient coverage
+
+---
+
+## Recommendation Scoring
+
+The current hybrid scoring system uses the following components:
+
+| Factor                | Weight |
+| --------------------- | -----: |
+| Ingredient Coverage   |    30% |
+| Budget Compatibility  |    30% |
+| Cooking Skill         |    10% |
+| Allergy Compatibility |    20% |
+| Disliked Ingredients  |    10% |
+
+The final score is calculated deterministically and is therefore explainable during evaluation and thesis defense.
+
+Allergy conflicts are treated as a hard restriction and result in a score of `0`.
+
+Meals that contain required ingredients that cannot be obtained or substituted are treated as fallback candidates and are currently excluded from the primary recommendation results.
+
+---
+
+## Ingredient Adaptation
+
+The recommendation system supports ingredient adaptation through substitution rules.
+
+For example:
+
+```text
+Required:
+Tomato
+
+User has:
+Tomato Sauce
+
+Substitution rule:
+Tomato → Tomato Sauce
+```
+
+Ingredients can be classified as:
+
+```text
+retain
+substitute
+omit
+unavailable
+```
+
+A meal is considered adaptable when all required ingredients can either:
+
+* be found in the pantry,
+* be substituted using a known substitution,
+* or be omitted when the ingredient is optional.
+
+Meals with unavailable required ingredients are classified as fallback candidates.
+
+---
+
+## TF-IDF Ingredient Coverage
+
+The recommendation system also includes a TF-IDF-based ingredient weighting component.
+
+Instead of treating every ingredient as equally important, ingredient coverage can account for ingredient importance within the meal corpus.
+
+This provides a more meaningful measure of how well the user's available ingredients match a meal.
+
+The system currently combines this ingredient coverage with the other deterministic scoring components.
+
+---
+
+# 📡 API Endpoints
+
+The backend exposes versioned routes under:
+
+```text
+/api/v1
+```
+
+## Profiles
+
+| Method | Endpoint                    | Description                           |
+| ------ | --------------------------- | ------------------------------------- |
+| POST   | `/api/v1/profiles`          | Create authenticated user's profile   |
+| GET    | `/api/v1/profiles/me`       | Retrieve authenticated user's profile |
+| PUT    | `/api/v1/profiles/me`       | Update authenticated user's profile   |
+| POST   | `/api/v1/profiles/me/image` | Upload/replace profile picture        |
+
+---
+
+## Pantry
+
+| Method | Endpoint              | Description                          |
+| ------ | --------------------- | ------------------------------------ |
+| POST   | `/api/v1/pantry`      | Add pantry item                      |
+| GET    | `/api/v1/pantry`      | Retrieve authenticated user's pantry |
+| PUT    | `/api/v1/pantry/{id}` | Update pantry item                   |
+| DELETE | `/api/v1/pantry/{id}` | Delete pantry item                   |
+
+---
+
+## Meals
+
+| Method | Endpoint                  | Description              |
+| ------ | ------------------------- | ------------------------ |
+| GET    | `/api/v1/meals`           | Retrieve available meals |
+| GET    | `/api/v1/meals/{meal_id}` | Retrieve meal details    |
+
+---
+
+## Recommendations
+
+| Method | Endpoint                  | Description                                |
+| ------ | ------------------------- | ------------------------------------------ |
+| GET    | `/api/v1/recommendations` | Generate personalized meal recommendations |
+
+Recommendation routes are protected using the authenticated Supabase user.
+
+---
+
+# 🔒 Authorization and User Isolation
+
+Protected endpoints use:
 
 ```text
 Authorization: Bearer <Supabase Access Token>
 ```
 
-Unauthenticated requests are rejected with:
+The backend resolves the authenticated Supabase UUID through:
 
 ```text
-401 Unauthorized
+JWT
+ ↓
+get_current_user()
+ ↓
+auth_id
+ ↓
+Profile
+ ↓
+User-owned data
 ```
 
-`POST /profiles/me/image` additionally requires that a profile already exists for the authenticated user — it returns `404 Not Found` otherwise, since there is no profile row yet to attach the image URL to. On the client, this endpoint is only called as a follow-up step, after `POST /profiles` or `PUT /profiles/me` has already succeeded.
+User-specific resources such as profiles and pantry items are associated with the authenticated user's profile.
 
-The image endpoint also validates:
-
-* **Content type** — only `image/jpeg`, `image/png`, `image/webp` are accepted (`422 Unprocessable Entity` otherwise)
-* **File size** — 5 MB maximum, matching the Supabase Storage bucket's own limit (`422` otherwise)
+A user must not be able to access another user's application data by manually providing another user's identifier.
 
 ---
 
-## 🗄 Database
+# 🖼️ Profile Images
+
+Profile images are stored using **Supabase Storage** in a public bucket named:
+
+```text
+profile-images
+```
+
+Supported formats:
+
+* JPEG
+* PNG
+* WebP
+
+Maximum file size:
+
+```text
+5 MB
+```
+
+Upload flow:
+
+```text
+Flutter
+    ↓
+Pick image locally
+    ↓
+Create/update profile
+    ↓
+POST /profiles/me/image
+    ↓
+FastAPI
+    ↓
+Supabase Storage
+    ↓
+Public image URL
+    ↓
+Profile.profile_image_url
+```
+
+The upload endpoint is intentionally separate from normal profile creation and update operations.
+
+This allows profile data to be saved independently from a potentially failed image upload.
+
+---
+
+# 🗄️ Database
 
 Database provider:
 
-* **Supabase PostgreSQL**
+**Supabase PostgreSQL**
 
-Current application tables include:
-
-* `profiles`
-* `food_allergies`
-* `disliked_ingredients`
-
-The profile relationships are structured as:
+Current application data includes:
 
 ```text
 profiles
    │
    ├── food_allergies
    │
-   └── disliked_ingredients
+   ├── disliked_ingredients
+   │
+   └── pantry_items
+
+meals
+   │
+   ├── meal_ingredients
+   │
+   └── meal_instructions
+
+ingredient_substitutions
 ```
 
-Both related tables reference `profiles.id` and use cascading deletion.
+The application uses relational foreign keys and cascading relationships where appropriate.
 
 The `profiles.auth_id` field stores the authenticated Supabase user's UUID.
 
-### Database migrations
-
-Database schema changes are managed using **Alembic**.
-
-Implemented migrations include:
-
-* Profile schema updates
-* Food allergies table
-* Disliked ingredients table
-* Related foreign keys and indexes
-
 ---
 
-## 🖼 Profile Images
+# 🔄 Recommendation Data Flow
 
-Profile images are stored using **Supabase Storage**, in a **public** bucket named `profile-images` (5 MB limit, `image/jpeg` / `image/png` / `image/webp` only — enforced both by the bucket configuration and by the API).
-
-Actual implemented flow:
+The current deterministic recommendation flow is:
 
 ```text
-Flutter
-    ↓
-Pick image locally (image_picker) — no upload yet
-    ↓
-Submit profile form → POST /profiles or PUT /profiles/me
-    ↓
-On success, upload the picked image:
-    POST /profiles/me/image  (multipart/form-data)
-    ↓
-FastAPI → shared/storage/supabase_storage.py
-    ↓
-Supabase Storage REST API (raw `requests` call, authenticated
-with the service-role key — no supabase-py client dependency,
-consistent with how shared/auth/jwt.py talks to Supabase's
-JWKS endpoint directly)
-    ↓
-Object written to the profile-images bucket at "{auth_id}.{ext}"
-(one object per user; re-uploads overwrite via x-upsert)
-    ↓
-Public URL constructed and saved onto the profile row
-    ↓
-{"profile_image_url": "..."} returned to Flutter
-```
-
-The upload is deliberately a **separate endpoint** from profile create/update, not combined multipart handling on those routes — this keeps `POST /profiles` and `PUT /profiles/me` as plain JSON endpoints, and lets the client treat a failed image upload as non-fatal (the rest of the profile is already saved) rather than needing to retry the whole form.
-
-The `profile_image_url` field is supported by the profile model and schemas, and is populated automatically by the upload endpoint — no separate client-side step is needed to persist the URL.
-
----
-
-## 📌 Current API Flow
-
-The complete, connected application flow is:
-
-```text
-Flutter
-      ↓
 Supabase Auth
       ↓
-JWT Access Token
+Authenticated User
       ↓
-FastAPI
+Profile
+      │
+      ├── Daily Budget
+      ├── Cooking Skill
+      ├── Allergies
+      └── Disliked Ingredients
+      │
       ↓
-JWT Verification (JWKS / ES256)
+Pantry
+      │
+      └── Available Ingredients
+      │
       ↓
-Current User Dependency
+Meals
+      │
+      ├── Ingredients
+      ├── Cost
+      └── Difficulty
+      │
       ↓
-Profile Service  ──────────────┐
-      ↓                        │
-Repository                     │ (image uploads only)
-      ↓                        ▼
-Supabase PostgreSQL   shared/storage/supabase_storage.py
-                                ↓
-                        Supabase Storage
+Ingredient Adaptation
+      ↓
+Ingredient Coverage
+      ↓
+Budget Score
+      ↓
+Skill Score
+      ↓
+Allergy Filtering
+      ↓
+Disliked Ingredient Score
+      ↓
+Hybrid Score
+      ↓
+Ranking
+      ↓
+Recommendations
 ```
 
-The backend authentication layer, profile CRUD, and profile image upload are all implemented and connected end-to-end to the Flutter client.
+---
+
+# 🧪 Current Backend Testing Status
+
+The backend modules can be imported and tested independently before frontend integration.
+
+For example, the recommendation service can be executed directly against the database.
+
+An empty pantry currently results in no primary recommendations when meals contain unavailable required ingredients. This is expected behavior because pantry contents have not yet been populated through the Flutter pantry interface.
+
+Example:
+
+```text
+Pantry:
+[]
+
+Available:
+set()
+
+Chicken Adobo:
+fallback
+```
+
+Once the Flutter pantry screen is implemented and the authenticated user adds ingredients, the recommendation endpoint can be tested end-to-end using real user data.
 
 ---
 
-## 🚧 Planned Features
+# 📱 Frontend Integration Status
 
-* Pantry Management
-* Ingredient Inventory
-* AI Meal Recommendation Engine
-* Weekly Meal Planner
-* Grocery List Generator
-* Saved Meals
-* Favorites
-* Nutrition Information
-* Admin Module
+The backend foundation for the following features is implemented:
+
+```text
+Authentication       ✅
+Profile              ✅
+Profile Image        ✅
+Meals Backend        ✅
+Pantry Backend       ✅
+Recommendation Logic ✅
+```
+
+The next development phase is connecting these backend features to Flutter.
+
+Planned Flutter features:
+
+```text
+features/
+├── authentication/
+├── profile/
+├── home/
+├── pantry/
+├── meals/
+└── recommendations/
+```
+
+The Flutter application will communicate with FastAPI using authenticated Supabase access tokens.
+
+The next integration flow is:
+
+```text
+Flutter
+   ↓
+Supabase Auth
+   ↓
+Access Token
+   ↓
+FastAPI
+   ↓
+Pantry / Meals / Recommendations
+   ↓
+Supabase PostgreSQL
+```
 
 ---
 
-## ⚙️ Installation
+# 🧠 AI Recommendation
+
+An external AI API is **not currently required** for the recommendation engine.
+
+The first implementation is intentionally deterministic:
+
+```text
+Profile
++
+Pantry
++
+Meals
++
+Explicit Business Rules
++
+Scoring
+```
+
+This provides an explainable recommendation system suitable for thesis evaluation.
+
+AI-based functionality can be evaluated and added later if it provides a meaningful improvement to the recommendation system.
+
+---
+
+# 🚧 Remaining Development
+
+The major remaining work for this development phase is frontend integration.
+
+## Flutter
+
+* Pantry feature
+* Pantry screen
+* Add/edit/delete pantry items
+* Meals feature
+* Meal list screen
+* Meal detail screen
+* Recommendations feature
+* Recommendation screen
+* Recommendation cards
+* Home screen integration
+* API datasource implementations
+* Repository implementations
+* Providers/state management
+* Authenticated API requests
+* Loading states
+* Error states
+* Empty-state handling
+
+## Integration Testing
+
+After Flutter integration:
+
+* Authentication → Home
+* Home → Pantry
+* Pantry → Recommendations
+* Recommendations → Meal Detail
+* Profile → Recommendations
+* JWT protection
+* User isolation
+* Empty pantry
+* Empty recommendations
+* API errors
+* Loading states
+* Database behavior
+
+---
+
+# ⚙️ Installation
 
 Clone the repository:
 
@@ -347,12 +761,6 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-If `python-multipart` isn't already listed, install it separately (required for the profile image upload endpoint):
-
-```bash
-pip install python-multipart
-```
-
 Create a `.env` file.
 
 Example:
@@ -370,25 +778,51 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 ```
 
-`SUPABASE_SERVICE_ROLE_KEY` is required for profile image uploads — it authenticates server-side writes to Supabase Storage and bypasses Row Level Security. It is **not** the same as the `anon` key used client-side by the Flutter app, and it must never be exposed to the client or committed to the repository.
+`SUPABASE_SERVICE_ROLE_KEY` is required for server-side profile image uploads.
 
-The backend retrieves Supabase's public JWT signing keys from:
+It must never be exposed to the Flutter client or committed to the repository.
 
-```text
-https://your-project.supabase.co/auth/v1/.well-known/jwks.json
+Do not commit `.env` or any Supabase secrets.
+
+---
+
+# 🗃️ Database Migrations
+
+Database schema changes are managed using **Alembic**.
+
+Run migrations with:
+
+```bash
+alembic upgrade head
 ```
 
-> Do not commit `.env` or any Supabase secrets to the repository.
+Create a new migration after model changes with:
 
-Run the server:
+```bash
+alembic revision --autogenerate -m "describe migration"
+```
+
+Always review generated migrations before applying them.
+
+---
+
+# ▶️ Running the Server
+
+Start the development server:
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
+The API will be available at:
+
+```text
+http://127.0.0.1:8000
+```
+
 ---
 
-## 📖 API Documentation
+# 📖 API Documentation
 
 Swagger UI:
 
@@ -401,6 +835,34 @@ ReDoc:
 ```text
 http://127.0.0.1:8000/redoc
 ```
+
+The Swagger documentation can be used to inspect and manually test the backend endpoints.
+
+---
+
+# 📌 Development Status
+
+Current Week 2 backend status:
+
+```text
+Authentication             ✅
+Profile                    ✅
+Profile Image              ✅
+Meals                      ✅
+Pantry                     ✅
+Recommendation Rules       ✅
+Recommendation Scoring     ✅
+Ingredient Substitution    ✅
+TF-IDF Coverage            ✅
+Recommendation API         ✅
+Flutter Pantry Integration ⏳
+Flutter Meals Integration  ⏳
+Flutter Recommendations    ⏳
+Home Integration           ⏳
+End-to-End Testing         ⏳
+```
+
+The backend recommendation foundation is complete enough to begin Flutter integration.
 
 ---
 

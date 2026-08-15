@@ -50,6 +50,7 @@ def create_meal_ingredient(
         ingredient_data.ingredient,
         ingredient_data.quantity,
         ingredient_data.unit,
+        ingredient_data.is_optional,
     )
 
 

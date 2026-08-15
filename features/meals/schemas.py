@@ -18,6 +18,8 @@ class MealIngredientCreate(BaseModel):
         max_length=50,
     )
 
+    is_optional: bool = False
+
 
 class MealInstructionCreate(BaseModel):
     step_number: int = Field(
@@ -37,6 +39,7 @@ class MealIngredientResponse(BaseModel):
     ingredient: str
     quantity: Decimal
     unit: str
+    is_optional: bool
 
 
 class MealInstructionResponse(BaseModel):

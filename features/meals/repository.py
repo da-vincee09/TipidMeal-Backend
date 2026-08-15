@@ -39,12 +39,14 @@ def create_meal_ingredient(
     ingredient: str,
     quantity: Decimal,
     unit: str,
+    is_optional: bool,
 ) -> MealIngredient:
     meal_ingredient = MealIngredient(
         meal_id=meal_id,
         ingredient=ingredient,
         quantity=quantity,
         unit=unit,
+        is_optional=is_optional,
     )
 
     db.add(meal_ingredient)
