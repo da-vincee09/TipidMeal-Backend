@@ -83,6 +83,20 @@ def get_meals(
     )
 
 
+def get_ingredient_suggestions(
+    db: Session,
+    search: str,
+) -> list[str]:
+    search = search.strip()
+    if len(search) < 1:
+        return []
+
+    return repository.get_ingredient_suggestions(
+        db,
+        search,
+    )
+
+
 def get_meal_by_id(
     db: Session,
     meal_id: UUID,

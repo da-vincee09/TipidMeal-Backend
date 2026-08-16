@@ -12,6 +12,7 @@ from features.meals.schemas import (
     MealListResponse,
     MealResponse,
 )
+from fastapi import Query
 
 router = APIRouter(
     prefix="/meals",
@@ -87,6 +88,20 @@ def get_meals(
     return {
         "meals": meals,
     }
+
+
+@router.get(
+    "/ingredients/suggestions",
+    response_model=list[str],
+)
+def get_ingredient_suggestions(
+    search: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    return service.get_ingredient_suggestions(
+        db,
+        search,
+    )
 
 
 @router.get(

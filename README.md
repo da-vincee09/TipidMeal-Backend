@@ -221,7 +221,9 @@ Implemented:
 * Pantry item retrieval
 * Pantry item updates
 * Pantry item deletion
-* Quantity and unit handling
+* Quantity handling
+* Unit handling
+* Ingredient quantity aggregation
 
 Pantry architecture:
 
@@ -236,6 +238,50 @@ PostgreSQL
 ```
 
 The pantry is also used as an input to the recommendation system.
+
+### Pantry Quantity Handling
+
+The recommendation system now represents pantry availability using both **ingredient name and unit**.
+
+For example:
+
+```text
+Pantry
+
+Rice
+  kg → 2
+
+Eggs
+  pcs → 6
+
+Tomato
+  pcs → 4
+```
+
+Multiple pantry entries for the same ingredient and unit are combined.
+
+For example:
+
+```text
+Rice
+2 kg
++
+1 kg
+=
+3 kg
+```
+
+Different units are kept separately because the backend does not currently perform automatic unit conversion.
+
+For example:
+
+```text
+Rice
+kg → 2
+g  → 500
+```
+
+These values are not automatically converted into a common unit.
 
 ---
 
@@ -279,8 +325,45 @@ Implemented:
 * Meal detail retrieval
 * Ingredient relationships
 * Instruction relationships
+* Ingredient suggestion search
 
 The meal database serves as the source of candidate meals for the recommendation system.
+
+---
+
+## 🔎 Ingredient Suggestions
+
+The Meals module provides an ingredient suggestion endpoint for searching existing meal ingredients.
+
+```text
+GET /api/v1/meals/ingredients/suggestions?search=tom
+```
+
+The endpoint:
+
+* Accepts a search string
+* Performs case-insensitive matching
+* Returns distinct ingredient names
+* Sorts results alphabetically
+* Limits results to 10 suggestions by default
+
+Example:
+
+```text
+GET /api/v1/meals/ingredients/suggestions?search=tom
+```
+
+Possible response:
+
+```json
+[
+  "Tomato",
+  "Tomato Sauce",
+  "Tomato Paste"
+]
+```
+
+This endpoint can be used by the Flutter application for ingredient autocomplete and search functionality.
 
 ---
 
@@ -311,6 +394,8 @@ Recommended Meals
 Recommendations consider:
 
 * Ingredient availability
+* Pantry ingredient quantities
+* Ingredient units
 * Ingredient substitutions
 * Estimated meal cost
 * User daily budget
@@ -337,11 +422,11 @@ The final score is calculated deterministically and is therefore explainable dur
 
 Allergy conflicts are treated as a hard restriction and result in a score of `0`.
 
-Meals that contain required ingredients that cannot be obtained or substituted are treated as fallback candidates and are currently excluded from the primary recommendation results.
+Meals that contain required ingredients that cannot be obtained or substituted are treated as fallback candidates and are excluded from the primary recommendation results.
 
 ---
 
-## Ingredient Adaptation
+# 🧩 Ingredient Adaptation
 
 The recommendation system supports ingredient adaptation through substitution rules.
 
@@ -358,22 +443,165 @@ Substitution rule:
 Tomato → Tomato Sauce
 ```
 
-Ingredients can be classified as:
+Ingredients can now be classified as:
 
 ```text
 retain
 substitute
+insufficient
 omit
 unavailable
 ```
 
-A meal is considered adaptable when all required ingredients can either:
+### Retain
 
-* be found in the pantry,
-* be substituted using a known substitution,
-* or be omitted when the ingredient is optional.
+An ingredient is retained when the pantry contains the ingredient.
 
-Meals with unavailable required ingredients are classified as fallback candidates.
+If the pantry and recipe use the same unit, the available quantity is checked against the required quantity.
+
+Example:
+
+```text
+Required:
+Rice → 500 g
+
+Pantry:
+Rice → 1 kg
+
+Result:
+retain
+```
+
+### Insufficient
+
+An ingredient is classified as `insufficient` when:
+
+* The ingredient exists in the pantry.
+* The pantry unit matches the recipe unit.
+* The pantry quantity is less than the required quantity.
+
+Example:
+
+```text
+Required:
+Rice → 1 kg
+
+Pantry:
+Rice → 500 g
+
+Result:
+insufficient
+```
+
+The response includes quantity information:
+
+```json
+{
+  "ingredient": "Rice",
+  "action": "insufficient",
+  "available_quantity": 500,
+  "required_quantity": 1000,
+  "unit": "g"
+}
+```
+
+An `insufficient` ingredient is treated as a **soft warning** rather than an unavailable ingredient.
+
+It does not automatically cause the meal to become a fallback candidate.
+
+### Different Units
+
+The backend does not currently perform automatic unit conversion.
+
+For example:
+
+```text
+Pantry:
+Rice → 1 kg
+
+Recipe:
+Rice → 500 g
+```
+
+Because the units differ, the backend does not attempt to determine whether the quantity is sufficient.
+
+Instead, the ingredient is retained because the ingredient itself exists in the pantry.
+
+This avoids unsafe quantity comparisons without a reliable unit-conversion system.
+
+### Unavailable
+
+An ingredient is classified as `unavailable` when it is not present in the pantry and cannot be substituted.
+
+Only a true `unavailable` ingredient can cause a meal to become a fallback candidate.
+
+---
+
+# 🧠 Recommendation Availability Model
+
+The recommendation service now represents pantry availability as:
+
+```text
+Ingredient
+    ↓
+Unit
+    ↓
+Quantity
+```
+
+Conceptually:
+
+```python
+{
+    "rice": {
+        "kg": 2
+    },
+    "eggs": {
+        "pcs": 6
+    },
+    "tomato": {
+        "pcs": 4
+    }
+}
+```
+
+This allows the recommendation system to distinguish between:
+
+```text
+Ingredient exists
+        ↓
+Does the unit match?
+        ↓
+Yes → Compare quantity
+        ↓
+Enough? ── Yes → retain
+        │
+        └── No → insufficient
+```
+
+If the units do not match:
+
+```text
+Ingredient exists
+        ↓
+Different units
+        ↓
+Cannot safely compare
+        ↓
+retain
+```
+
+If the ingredient does not exist:
+
+```text
+Ingredient missing
+        ↓
+Check substitution
+        ↓
+Substitution exists → substitute
+        ↓
+No substitution → unavailable
+```
 
 ---
 
@@ -386,6 +614,8 @@ Instead of treating every ingredient as equally important, ingredient coverage c
 This provides a more meaningful measure of how well the user's available ingredients match a meal.
 
 The system currently combines this ingredient coverage with the other deterministic scoring components.
+
+Quantity sufficiency is handled separately from the name-based ingredient coverage calculation.
 
 ---
 
@@ -421,10 +651,11 @@ The backend exposes versioned routes under:
 
 ## Meals
 
-| Method | Endpoint                  | Description              |
-| ------ | ------------------------- | ------------------------ |
-| GET    | `/api/v1/meals`           | Retrieve available meals |
-| GET    | `/api/v1/meals/{meal_id}` | Retrieve meal details    |
+| Method | Endpoint                                | Description                   |
+| ------ | --------------------------------------- | ----------------------------- |
+| GET    | `/api/v1/meals`                         | Retrieve available meals      |
+| GET    | `/api/v1/meals/ingredients/suggestions` | Search ingredient suggestions |
+| GET    | `/api/v1/meals/{meal_id}`               | Retrieve meal details         |
 
 ---
 
@@ -563,7 +794,9 @@ Profile
       ↓
 Pantry
       │
-      └── Available Ingredients
+      ├── Available Ingredients
+      ├── Quantities
+      └── Units
       │
       ↓
 Meals
@@ -574,6 +807,13 @@ Meals
       │
       ↓
 Ingredient Adaptation
+      │
+      ├── Retain
+      ├── Substitute
+      ├── Insufficient
+      ├── Omit
+      └── Unavailable
+      │
       ↓
 Ingredient Coverage
       ↓
@@ -598,22 +838,70 @@ Recommendations
 
 The backend modules can be imported and tested independently before frontend integration.
 
-For example, the recommendation service can be executed directly against the database.
+The recommendation service can be executed directly against the database.
 
-An empty pantry currently results in no primary recommendations when meals contain unavailable required ingredients. This is expected behavior because pantry contents have not yet been populated through the Flutter pantry interface.
+### Empty Pantry
+
+An empty pantry results in no primary recommendations when meals contain unavailable required ingredients.
 
 Example:
 
 ```text
 Pantry:
-[]
+{}
 
-Available:
-set()
+Meal:
+Chicken Adobo
 
-Chicken Adobo:
-fallback
+Required ingredient:
+Chicken
+
+Result:
+unavailable → fallback
 ```
+
+### Sufficient Quantity
+
+```text
+Pantry:
+Rice → 2 kg
+
+Recipe:
+Rice → 500 g
+
+Result:
+retain
+```
+
+### Insufficient Quantity
+
+```text
+Pantry:
+Rice → 500 g
+
+Recipe:
+Rice → 1 kg
+
+Result:
+insufficient
+```
+
+The meal does not automatically become a fallback candidate because the ingredient exists in the user's pantry.
+
+### Different Units
+
+```text
+Pantry:
+Rice → 1 kg
+
+Recipe:
+Rice → 500 g
+
+Result:
+retain
+```
+
+The backend does not perform automatic unit conversion.
 
 Once the Flutter pantry screen is implemented and the authenticated user adds ingredients, the recommendation endpoint can be tested end-to-end using real user data.
 
@@ -624,12 +912,18 @@ Once the Flutter pantry screen is implemented and the authenticated user adds in
 The backend foundation for the following features is implemented:
 
 ```text
-Authentication       ✅
-Profile              ✅
-Profile Image        ✅
-Meals Backend        ✅
-Pantry Backend       ✅
-Recommendation Logic ✅
+Authentication           ✅
+Profile                  ✅
+Profile Image            ✅
+Meals Backend            ✅
+Ingredient Suggestions   ✅
+Pantry Backend           ✅
+Pantry Quantity Handling ✅
+Recommendation Rules     ✅
+Ingredient Substitution  ✅
+Recommendation Scoring   ✅
+TF-IDF Coverage          ✅
+Recommendation API       ✅
 ```
 
 The next development phase is connecting these backend features to Flutter.
@@ -699,6 +993,7 @@ The major remaining work for this development phase is frontend integration.
 * Pantry feature
 * Pantry screen
 * Add/edit/delete pantry items
+* Ingredient autocomplete using the ingredient suggestion endpoint
 * Meals feature
 * Meal list screen
 * Meal detail screen
@@ -723,10 +1018,14 @@ After Flutter integration:
 * Pantry → Recommendations
 * Recommendations → Meal Detail
 * Profile → Recommendations
+* Ingredient autocomplete
 * JWT protection
 * User isolation
 * Empty pantry
 * Empty recommendations
+* Insufficient pantry quantities
+* Different pantry units
+* Ingredient substitutions
 * API errors
 * Loading states
 * Database behavior
@@ -842,27 +1141,32 @@ The Swagger documentation can be used to inspect and manually test the backend e
 
 # 📌 Development Status
 
-Current Week 2 backend status:
+Current **Week 2 backend status**:
 
 ```text
-Authentication             ✅
-Profile                    ✅
-Profile Image              ✅
-Meals                      ✅
-Pantry                     ✅
-Recommendation Rules       ✅
-Recommendation Scoring     ✅
-Ingredient Substitution    ✅
-TF-IDF Coverage            ✅
-Recommendation API         ✅
-Flutter Pantry Integration ⏳
-Flutter Meals Integration  ⏳
-Flutter Recommendations    ⏳
-Home Integration           ⏳
-End-to-End Testing         ⏳
+Authentication                ✅
+Profile                       ✅
+Profile Image                 ✅
+Meals                         ✅
+Ingredient Suggestions        ✅
+Pantry                        ✅
+Pantry Quantity Handling      ✅
+Recommendation Rules          ✅
+Recommendation Scoring        ✅
+Ingredient Substitution       ✅
+Ingredient Availability       ✅
+TF-IDF Coverage               ✅
+Recommendation API            ✅
+Flutter Pantry Integration    ⏳
+Flutter Meals Integration     ⏳
+Flutter Recommendations      ⏳
+Home Integration              ⏳
+End-to-End Testing            ⏳
 ```
 
-The backend recommendation foundation is complete enough to begin Flutter integration.
+The Week 2 backend provides the core foundation for personalized meal recommendations, including pantry-aware ingredient availability, quantity-aware matching, ingredient substitutions, deterministic scoring, TF-IDF ingredient coverage, and ingredient autocomplete.
+
+The next major development phase is Flutter integration and end-to-end testing.
 
 ---
 

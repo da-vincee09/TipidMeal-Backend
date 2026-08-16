@@ -8,6 +8,8 @@ from features.meals.schemas import (
 from features.meals.models.meal_ingredient import MealIngredient
 from features.meals.models.meal_instruction import MealInstruction
 from decimal import Decimal
+from sqlalchemy import select
+from features.meals.models.meal_ingredient import MealIngredient
 
 
 def create_meal(
@@ -86,6 +88,21 @@ def get_meals(
         )
         .all()
     )
+
+
+def get_ingredient_suggestions(
+    db: Session,
+    search: str,
+    limit: int = 10,
+) -> list[str]:
+    stmt = (
+        select(MealIngredient.ingredient)
+        .where(MealIngredient.ingredient.ilike(f"%{search}%"))
+        .distinct()
+        .order_by(MealIngredient.ingredient)
+        .limit(limit)
+    )
+    return list(db.execute(stmt).scalars().all())
 
 
 def get_meal_by_id(

@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-
+from decimal import Decimal
 from features.meals.models import Meal
 from features.pantry.models import PantryItem
 from features.recommendations.utils import normalize_ingredient
@@ -32,11 +32,19 @@ def get_recommendation_data(db: Session, profile_id):
 
 def get_available_ingredients(
     pantry_items,
-) -> set[str]:
-    return {
-        normalize_ingredient(item.ingredient)
-        for item in pantry_items
-    }
+) -> dict[str, dict[str, Decimal]]:
+    available: dict[str, dict[str, Decimal]] = {}
+
+    for item in pantry_items:
+        name = normalize_ingredient(item.ingredient)
+        unit = item.unit.strip().lower()
+
+        available.setdefault(name, {})
+        available[name][unit] = (
+            available[name].get(unit, Decimal("0")) + item.quantity
+        )
+
+    return available
 
 
 def calculate_meal_coverage(
