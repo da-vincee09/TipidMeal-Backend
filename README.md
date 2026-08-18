@@ -1,6 +1,6 @@
 # TipidMeal Backend
 
-Backend API for **TipidMeal**, a mobile application that helps users discover affordable, personalized meals based on their budget, cooking skills, dietary restrictions, ingredient preferences, pantry availability, and meal-planning needs.
+Backend API for **TipidMeal**, a mobile application that helps users discover affordable, personalized meals based on their budget, cooking skills, dietary restrictions, ingredient preferences, pantry availability, meal-planning needs, and grocery requirements.
 
 Built with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL (Supabase)**, **Supabase Auth**, and **Alembic**.
 
@@ -80,12 +80,17 @@ backend/
 │   │   ├── service.py
 │   │   └── router.py
 │   │
-│   └── meal_planner/
-│       ├── models/
-│       │   ├── __init__.py
-│       │   └── meal_plan_entry.py
+│   ├── meal_planner/
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   └── meal_plan_entry.py
+│   │   ├── schemas.py
+│   │   ├── repository.py
+│   │   ├── service.py
+│   │   └── router.py
+│   │
+│   └── grocery_list/
 │       ├── schemas.py
-│       ├── repository.py
 │       ├── service.py
 │       └── router.py
 │
@@ -121,6 +126,8 @@ backend/
 
 The backend follows a feature-based layered architecture.
 
+For features that require database persistence:
+
 ```text
 Router
    ↓
@@ -133,6 +140,20 @@ SQLAlchemy Models
 PostgreSQL
 ```
 
+The Grocery List feature is different because it is a **computed feature**.
+
+Instead of storing grocery-list records in a new database table, the grocery list is generated from existing application data:
+
+```text
+Router
+   ↓
+Grocery List Service
+   ↓
+Meal Planner + Meals + Pantry
+   ↓
+Computed Grocery List
+```
+
 Each major feature is isolated inside its own module.
 
 Current backend modules:
@@ -143,6 +164,7 @@ Pantry
 Meals
 Recommendations
 Meal Planner
+Grocery List
 ```
 
 Shared functionality such as authentication, database configuration, storage, and common schemas is placed inside `shared/`.
@@ -685,6 +707,328 @@ Implemented:
 
 ---
 
+# 🛒 Grocery List Module
+
+The Grocery List is a **derived feature** that converts a user's meal plan into a list of ingredients that need to be purchased.
+
+The feature connects the Meal Planner, Meals, and Pantry modules.
+
+The overall flow is:
+
+```text
+Meal Plan
+     ↓
+Planned Meals
+     ↓
+Required Ingredients
+     ↓
+Combine Duplicate Ingredients
+     ↓
+Compare Against Pantry
+     ↓
+Subtract Available Pantry Quantity
+     ↓
+Remaining Quantity
+     ↓
+Grocery List
+```
+
+The Grocery List does **not** introduce a new SQLAlchemy model or database table in the current implementation.
+
+Instead, the list is computed whenever the endpoint is requested.
+
+This keeps the grocery list synchronized with the latest:
+
+* Meal Plan
+* Meal Ingredients
+* Pantry contents
+
+---
+
+## Grocery List Architecture
+
+Unlike database-backed CRUD features, Grocery List uses a lightweight computed architecture:
+
+```text
+Authenticated User
+       ↓
+Profile
+       ↓
+Meal Planner
+       ↓
+Planned Meals
+       ↓
+Meal Ingredients
+       ↓
+Grocery List Service
+       ↓
+Pantry
+       ↓
+Computed Grocery List
+```
+
+The feature structure is:
+
+```text
+features/
+└── grocery_list/
+    ├── schemas.py
+    ├── service.py
+    └── router.py
+```
+
+No `models/` directory is required for the current computed-only implementation.
+
+---
+
+## Grocery List Calculation
+
+The Grocery List service performs the following operations.
+
+### 1. Retrieve Planned Meals
+
+The service retrieves the authenticated user's planned meals for the requested date range.
+
+Example:
+
+```text
+Monday
+  Breakfast → Oatmeal
+  Lunch     → Chicken Adobo
+
+Tuesday
+  Dinner    → Chicken Adobo
+```
+
+---
+
+### 2. Retrieve Required Ingredients
+
+The ingredients of all planned meals are collected.
+
+Example:
+
+```text
+Oatmeal:
+- Oats       100 g
+- Milk       200 ml
+
+Chicken Adobo:
+- Chicken    500 g
+- Soy Sauce  50 ml
+- Vinegar    50 ml
+
+Chicken Adobo:
+- Chicken    500 g
+- Soy Sauce  50 ml
+- Vinegar    50 ml
+```
+
+---
+
+### 3. Combine Duplicate Ingredients
+
+Ingredients with the same normalized ingredient name and unit are combined.
+
+Example:
+
+```text
+Chicken
+500 g
++
+500 g
+=
+1000 g
+```
+
+Similarly:
+
+```text
+Soy Sauce
+50 ml
++
+50 ml
+=
+100 ml
+```
+
+The Grocery List does not combine ingredients with different units.
+
+Example:
+
+```text
+Rice → 1 kg
+Rice → 500 g
+```
+
+These remain separate because the backend does not currently perform automatic unit conversion.
+
+---
+
+### 4. Compare Against Pantry
+
+The aggregated requirements are compared against the user's current pantry.
+
+Example:
+
+```text
+Required:
+Rice → 2 kg
+
+Pantry:
+Rice → 1 kg
+```
+
+The remaining quantity is:
+
+```text
+1 kg
+```
+
+Therefore:
+
+```text
+Grocery List:
+Rice → 1 kg
+```
+
+---
+
+### 5. Fully Stocked Ingredients
+
+If the pantry already contains enough of an ingredient under the same unit, the ingredient does not need to appear in the grocery list.
+
+Example:
+
+```text
+Required:
+Eggs → 6 pcs
+
+Pantry:
+Eggs → 12 pcs
+```
+
+Result:
+
+```text
+No eggs need to be purchased.
+```
+
+---
+
+### 6. Different Units
+
+The Grocery List follows the same unit-safety rule used by the recommendation system.
+
+Automatic unit conversion is not currently performed.
+
+Example:
+
+```text
+Required:
+Rice → 500 g
+
+Pantry:
+Rice → 1 kg
+```
+
+Because the units differ, the backend does not automatically subtract the quantities.
+
+The required amount remains represented in the Grocery List rather than making an unsafe conversion.
+
+---
+
+# 🧾 Grocery List Schemas
+
+The Grocery List response contains information necessary for the frontend to display the shopping requirements.
+
+A Grocery List item contains:
+
+```text
+Ingredient
+Unit
+Required Quantity
+Pantry Quantity
+Quantity to Buy
+```
+
+Conceptually:
+
+```json
+{
+  "ingredient": "Chicken",
+  "unit": "g",
+  "required_quantity": 1000,
+  "pantry_quantity": 500,
+  "quantity_to_buy": 500
+}
+```
+
+The overall response also contains the date range covered by the grocery list.
+
+---
+
+# 📆 Grocery List Date Range
+
+The Grocery List endpoint accepts:
+
+```text
+start_date
+end_date
+```
+
+The date range determines which planned meals contribute ingredients to the grocery list.
+
+If no date range is provided, the backend uses the current week.
+
+Example:
+
+```text
+GET /api/v1/grocery-list
+```
+
+generates the grocery list for the current week.
+
+A specific date range can also be requested:
+
+```text
+GET /api/v1/grocery-list?start_date=2026-08-18&end_date=2026-08-24
+```
+
+---
+
+# 🛍️ Grocery List Data Flow
+
+The complete Grocery List flow is:
+
+```text
+Supabase Auth
+      ↓
+Authenticated User
+      ↓
+Profile
+      ↓
+Meal Planner
+      ↓
+Planned Meals
+      ↓
+Meal Ingredients
+      ↓
+Ingredient Aggregation
+      ↓
+Pantry Availability
+      ↓
+Quantity Comparison
+      ↓
+Missing Ingredients
+      ↓
+Grocery List
+```
+
+This makes the Grocery List the final derived feature of the Pantry + Meals + Meal Planner workflow.
+
+---
+
 # 📡 API Endpoints
 
 All API routes are versioned under:
@@ -750,6 +1094,29 @@ Meal Planner routes are protected using the authenticated Supabase user.
 
 ---
 
+## Grocery List
+
+| Method | Endpoint                                     | Description                                     |
+| ------ | -------------------------------------------- | ----------------------------------------------- |
+| GET    | `/api/v1/grocery-list`                       | Generate grocery list for the current week      |
+| GET    | `/api/v1/grocery-list?start_date=&end_date=` | Generate grocery list for a specific date range |
+
+The Grocery List endpoint is protected using the authenticated Supabase user.
+
+The list is calculated dynamically from:
+
+```text
+Meal Plan
++
+Meal Ingredients
++
+Pantry
+```
+
+No grocery-list records are persisted in the database in the current implementation.
+
+---
+
 # 🔒 Authorization and User Isolation
 
 Protected endpoints use:
@@ -780,13 +1147,55 @@ For example:
 Authenticated User
        ↓
 Profile
-       ↓
-Pantry Items
-       ↓
-Meal Plan Entries
+       ├── Pantry Items
+       └── Meal Plan Entries
 ```
 
-A user must not be able to access another user's pantry or meal-plan entries by manually supplying another user's identifier.
+The Grocery List also follows this ownership model.
+
+The authenticated user can only generate a Grocery List using:
+
+```text
+Their Meal Plan
++
+Their Pantry
+```
+
+A user cannot use another user's profile identifier to retrieve another user's grocery requirements.
+
+---
+
+# 🛒 Grocery List and Pantry Relationship
+
+The Grocery List does not duplicate pantry data.
+
+Instead, it reads the latest pantry state when the endpoint is requested.
+
+Therefore:
+
+```text
+Add Pantry Item
+      ↓
+Grocery List recalculates
+```
+
+and:
+
+```text
+Delete Pantry Item
+      ↓
+Grocery List recalculates
+```
+
+Similarly:
+
+```text
+Change Meal Plan
+      ↓
+Grocery List recalculates
+```
+
+This allows the Grocery List to remain a live derived view.
 
 ---
 
@@ -859,6 +1268,10 @@ ingredient_substitutions
 meal_plan_entries
 ```
 
+There is currently **no `grocery_list_items` table**.
+
+The Grocery List is computed dynamically from existing data.
+
 Main relationships:
 
 ```text
@@ -872,6 +1285,18 @@ Meal
  ├── Meal Ingredients
  ├── Meal Instructions
  └── Meal Plan Entries
+```
+
+Derived Grocery List:
+
+```text
+Meal Plan Entries
+        +
+Meal Ingredients
+        +
+Pantry Items
+        ↓
+Computed Grocery List
 ```
 
 Foreign keys and cascading behavior are defined at the database level where appropriate.
@@ -959,11 +1384,51 @@ Meal-plan entries are scoped to the authenticated user's profile.
 
 ---
 
+# 🛒 Grocery List Data Flow
+
+The Grocery List completes the meal-planning workflow.
+
+```text
+Meal Planner
+      ↓
+Planned Meals
+      ↓
+Required Ingredients
+      ↓
+Aggregate Ingredients
+      ↓
+Compare With Pantry
+      ↓
+Subtract Available Quantities
+      ↓
+Missing Ingredients
+      ↓
+Grocery List
+```
+
+The overall TipidMeal planning workflow is therefore:
+
+```text
+Recommendations
+      ↓
+Meal Selection
+      ↓
+Meal Planner
+      ↓
+Grocery List
+      ↓
+Pantry
+```
+
+The Grocery List acts as the bridge between planned meals and shopping requirements.
+
+---
+
 # 🧪 Backend Testing and Validation
 
 Backend modules can be independently imported and validated before integration testing.
 
-Example validation commands:
+Example Meal Planner validation:
 
 ```bash
 python -c "from features.meal_planner.models import MealPlanEntry; print(MealPlanEntry.__tablename__)"
@@ -985,11 +1450,120 @@ python -c "from features.meal_planner.service import create_meal_plan_entry, get
 python -c "from features.meal_planner.router import router; print('Meal planner router OK')"
 ```
 
+Grocery List validation:
+
+```bash
+python -c "from features.grocery_list.schemas import GroceryListItem, GroceryListResponse; print('Grocery list schemas OK')"
+```
+
+```bash
+python -c "from features.grocery_list.service import get_grocery_list; print('Grocery list service OK')"
+```
+
+```bash
+python -c "from features.grocery_list.router import router; print('Grocery list router OK')"
+```
+
 The complete FastAPI application can be verified with:
 
 ```bash
 python -c "from app.main import app; print('FastAPI app OK')"
 ```
+
+---
+
+# 🧪 Grocery List Validation
+
+The Grocery List should be tested against the following scenarios.
+
+### Empty Meal Plan
+
+```text
+Meal Plan
+    ↓
+No planned meals
+    ↓
+Empty Grocery List
+```
+
+The endpoint should return an empty list rather than producing an error.
+
+---
+
+### Fully Stocked Pantry
+
+```text
+Required:
+Rice → 1 kg
+
+Pantry:
+Rice → 1 kg
+
+Result:
+Nothing to buy
+```
+
+---
+
+### Partially Stocked Pantry
+
+```text
+Required:
+Rice → 2 kg
+
+Pantry:
+Rice → 1 kg
+
+Result:
+Rice → 1 kg to buy
+```
+
+---
+
+### Duplicate Ingredients
+
+```text
+Meal A:
+Chicken → 500 g
+
+Meal B:
+Chicken → 500 g
+
+Required:
+Chicken → 1000 g
+```
+
+The duplicate ingredient should be aggregated before pantry subtraction.
+
+---
+
+### Different Units
+
+```text
+Required:
+Rice → 500 g
+
+Pantry:
+Rice → 1 kg
+```
+
+The backend should not perform automatic unit conversion.
+
+---
+
+### User Isolation
+
+```text
+User A
+  ↓
+Meal Plan A
+  +
+Pantry A
+  ↓
+Grocery List A
+```
+
+User A must never receive ingredients derived from User B's meal plan or pantry.
 
 ---
 
@@ -1023,6 +1597,8 @@ The current database includes the Meal Planner migration:
 31b00c8d3565
 create meal plan entries
 ```
+
+The Grocery List feature does **not** require a new migration because the current implementation does not introduce a database model or table.
 
 Migration chain:
 
@@ -1122,29 +1698,36 @@ Swagger UI can be used to inspect and manually test API endpoints.
 The current backend implementation includes:
 
 ```text
-Authentication                 ✅
-Supabase JWT Verification      ✅
-Profile Management             ✅
-Profile Image Upload           ✅
-Food Allergies                 ✅
-Disliked Ingredients           ✅
-Meals                          ✅
-Meal Ingredients               ✅
-Meal Instructions              ✅
-Ingredient Suggestions         ✅
-Pantry Management              ✅
-Pantry Quantity Handling       ✅
-Ingredient Substitutions       ✅
-Recommendation Rules           ✅
-Recommendation Scoring         ✅
-Ingredient Availability        ✅
-TF-IDF Ingredient Coverage     ✅
-Recommendation API             ✅
-Meal Planner                   ✅
-Meal Plan CRUD                 ✅
-Meal Plan Authentication       ✅
-Meal Plan User Isolation       ✅
-Alembic Migrations              ✅
+Authentication                  ✅
+Supabase JWT Verification       ✅
+Profile Management              ✅
+Profile Image Upload            ✅
+Food Allergies                  ✅
+Disliked Ingredients            ✅
+Meals                            ✅
+Meal Ingredients                 ✅
+Meal Instructions                ✅
+Ingredient Suggestions           ✅
+Pantry Management                ✅
+Pantry Quantity Handling         ✅
+Ingredient Substitutions         ✅
+Recommendation Rules             ✅
+Recommendation Scoring           ✅
+Ingredient Availability          ✅
+TF-IDF Ingredient Coverage       ✅
+Recommendation API               ✅
+Meal Planner                     ✅
+Meal Plan CRUD                   ✅
+Meal Plan Authentication         ✅
+Meal Plan User Isolation         ✅
+Grocery List                     ✅
+Grocery List Aggregation         ✅
+Grocery List Pantry Comparison   ✅
+Grocery List Unit Safety         ✅
+Grocery List Date Range          ✅
+Grocery List Authentication      ✅
+Grocery List User Isolation      ✅
+Alembic Migrations               ✅
 ```
 
 The backend currently provides the core API and database functionality required by the TipidMeal application.
@@ -1179,7 +1762,54 @@ An external AI API is not required for the current recommendation implementation
 
 ---
 
+# 🧠 Overall TipidMeal Feature Flow
+
+The current backend supports the following overall application workflow:
+
+```text
+                    Supabase Auth
+                         ↓
+                      Profile
+                         ↓
+        ┌────────────────┼────────────────┐
+        ↓                ↓                ↓
+     Pantry            Meals        Recommendations
+        │                │                │
+        │                └────────────────┘
+        │                         ↓
+        │                  Recommended Meals
+        │                         ↓
+        └──────────────→  Meal Planner
+                                ↓
+                         Planned Meals
+                                ↓
+                         Meal Ingredients
+                                ↓
+                         Grocery List
+                                ↓
+                       Missing Ingredients
+                                ↓
+                             Shopping
+```
+
+This creates the core TipidMeal workflow:
+
+```text
+Discover
+   ↓
+Plan
+   ↓
+Check Pantry
+   ↓
+Generate Grocery List
+   ↓
+Shop
+   ↓
+Cook
+```
+
+---
+
 # 📄 License
 
 This project is developed as part of an undergraduate thesis.
-

@@ -11,6 +11,7 @@ from features.meals.schemas import (
     MealInstructionResponse,
     MealListResponse,
     MealResponse,
+    IngredientSuggestionResponse,
 )
 from fastapi import Query
 
@@ -92,7 +93,7 @@ def get_meals(
 
 @router.get(
     "/ingredients/suggestions",
-    response_model=list[str],
+    response_model=list[IngredientSuggestionResponse],
 )
 def get_ingredient_suggestions(
     search: str = Query(..., min_length=1),
@@ -102,6 +103,16 @@ def get_ingredient_suggestions(
         db,
         search,
     )
+
+
+@router.get(
+    "/units",
+    response_model=list[str],
+)
+def get_all_units(
+    db: Session = Depends(get_db),
+):
+    return service.get_all_units(db)
 
 
 @router.get(

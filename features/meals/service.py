@@ -97,6 +97,10 @@ def get_ingredient_suggestions(
     )
 
 
+def get_all_units(db: Session) -> list[str]:
+    return repository.get_all_units(db)
+
+
 def get_meal_by_id(
     db: Session,
     meal_id: UUID,

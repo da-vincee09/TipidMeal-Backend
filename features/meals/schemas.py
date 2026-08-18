@@ -142,3 +142,8 @@ class MealResponse(BaseModel):
 
 class MealListResponse(BaseModel):
     meals: list[MealResponse]
+
+
+class IngredientSuggestionResponse(BaseModel):
+    ingredient: str
+    units: list[str]

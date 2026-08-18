@@ -1,7 +1,8 @@
 from uuid import UUID
 from datetime import date
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from features.meal_planner.models.meal_plan_entry import MealPlanEntry
+from features.meals.models.meal import Meal
 
 
 def create_meal_plan_entry(
@@ -35,6 +36,13 @@ def get_meal_plan_entries(
 
     return (
         db.query(MealPlanEntry)
+        .options(
+            joinedload(
+                MealPlanEntry.meal
+            ).joinedload(
+                Meal.ingredients
+            )
+        )
         .filter(
             MealPlanEntry.profile_id == profile_id,
             MealPlanEntry.planned_date >= start_date,

@@ -94,13 +94,34 @@ def get_ingredient_suggestions(
     db: Session,
     search: str,
     limit: int = 10,
-) -> list[str]:
+) -> list[dict]:
     stmt = (
-        select(MealIngredient.ingredient)
+        select(MealIngredient.ingredient, MealIngredient.unit)
         .where(MealIngredient.ingredient.ilike(f"%{search}%"))
         .distinct()
         .order_by(MealIngredient.ingredient)
-        .limit(limit)
+    )
+    rows = db.execute(stmt).all()
+
+    grouped: dict[str, list[str]] = {}
+    for ingredient, unit in rows:
+        if ingredient not in grouped and len(grouped) >= limit:
+            continue
+        units = grouped.setdefault(ingredient, [])
+        if unit not in units:
+            units.append(unit)
+
+    return [
+        {"ingredient": ingredient, "units": units}
+        for ingredient, units in grouped.items()
+    ]
+
+
+def get_all_units(db: Session) -> list[str]:
+    stmt = (
+        select(MealIngredient.unit)
+        .distinct()
+        .order_by(MealIngredient.unit)
     )
     return list(db.execute(stmt).scalars().all())
 
