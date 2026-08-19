@@ -1,6 +1,6 @@
 # TipidMeal Backend
 
-Backend API for **TipidMeal**, a mobile application that helps users discover affordable, personalized meals based on their budget, cooking skills, dietary restrictions, ingredient preferences, pantry availability, meal-planning needs, and grocery requirements.
+Backend API for **TipidMeal**, a mobile application that helps users discover affordable, personalized meals based on their budget, cooking skills, dietary restrictions, ingredient preferences, pantry availability, meal-planning needs, grocery requirements, and saved favorites.
 
 Built with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL (Supabase)**, **Supabase Auth**, and **Alembic**.
 
@@ -23,7 +23,7 @@ Built with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL (Supabase)**, **Supabas
 
 # 📁 Project Structure
 
-```text
+````text
 backend/
 │
 ├── app/
@@ -89,8 +89,17 @@ backend/
 │   │   ├── service.py
 │   │   └── router.py
 │   │
-│   └── grocery_list/
+│   ├── grocery_list/
+│   │   ├── schemas.py
+│   │   ├── service.py
+│   │   └── router.py
+│   │
+│   └── favorites/
+│       ├── models/
+│       │   ├── __init__.py
+│       │   └── favorite.py
 │       ├── schemas.py
+│       ├── repository.py
 │       ├── service.py
 │       └── router.py
 │
@@ -128,7 +137,7 @@ The backend follows a feature-based layered architecture.
 
 For features that require database persistence:
 
-```text
+````text
 Router
    ↓
 Service
@@ -138,13 +147,13 @@ Repository
 SQLAlchemy Models
    ↓
 PostgreSQL
-```
+````
 
 The Grocery List feature is different because it is a **computed feature**.
 
 Instead of storing grocery-list records in a new database table, the grocery list is generated from existing application data:
 
-```text
+````text
 Router
    ↓
 Grocery List Service
@@ -152,20 +161,35 @@ Grocery List Service
 Meal Planner + Meals + Pantry
    ↓
 Computed Grocery List
-```
+````
+
+Favorites follows the standard persisted-feature pattern, structurally similar to Meal Planner — a join table between a user's profile and a meal, scoped by ownership:
+
+````text
+Router
+   ↓
+Favorites Service
+   ↓
+Favorites Repository
+   ↓
+Favorite Model
+   ↓
+PostgreSQL
+````
 
 Each major feature is isolated inside its own module.
 
 Current backend modules:
 
-```text
+````text
 Profiles
 Pantry
 Meals
 Recommendations
 Meal Planner
 Grocery List
-```
+Favorites
+````
 
 Shared functionality such as authentication, database configuration, storage, and common schemas is placed inside `shared/`.
 
@@ -189,7 +213,7 @@ The backend currently supports:
 
 Authentication flow:
 
-```text
+````text
 Supabase Auth
       ↓
 JWT Access Token
@@ -201,15 +225,15 @@ JWKS Public Key
 ES256 Verification
       ↓
 Authenticated Supabase User UUID
-```
+````
 
 The authenticated Supabase UUID is used as the identity source for application-level user data.
 
 Protected requests use:
 
-```text
+````text
 Authorization: Bearer <Supabase Access Token>
-```
+````
 
 ---
 
@@ -242,13 +266,13 @@ Implemented:
 
 Profile architecture:
 
-```text
+````text
 Authenticated User
        ↓
 Profile
        ├── Food Allergies
        └── Disliked Ingredients
-```
+````
 
 The profile data is used by the recommendation system to personalize meal recommendations.
 
@@ -260,12 +284,12 @@ The pantry module represents ingredients currently available to an authenticated
 
 Example:
 
-```text
+````text
 Rice        2 kg
 Chicken     1 kg
 Eggs        6 pcs
 Tomato      4 pcs
-```
+````
 
 Each pantry item belongs to a user's application profile.
 
@@ -287,7 +311,7 @@ Implemented:
 
 Pantry architecture:
 
-```text
+````text
 Authenticated User
        ↓
 Profile
@@ -295,23 +319,23 @@ Profile
 Pantry Items
        ↓
 PostgreSQL
-```
+````
 
 ## Pantry Quantity Handling
 
 Pantry availability is represented using:
 
-```text
+````text
 Ingredient
     ↓
 Unit
     ↓
 Quantity
-```
+````
 
 Example:
 
-```python
+````python
 {
     "rice": {
         "kg": 2
@@ -323,30 +347,30 @@ Example:
         "pcs": 4
     }
 }
-```
+````
 
 Multiple pantry entries for the same ingredient and unit can be combined.
 
 For example:
 
-```text
+````text
 Rice
 2 kg
 +
 1 kg
 =
 3 kg
-```
+````
 
 Different units are kept separately.
 
 For example:
 
-```text
+````text
 Rice
 kg → 2
 g  → 500
-```
+````
 
 The backend does not currently perform automatic unit conversion.
 
@@ -371,13 +395,13 @@ Meals contain related ingredients and cooking instructions.
 
 Relationship:
 
-```text
+````text
 Meal
  │
  ├── Meal Ingredients
  │
  └── Meal Instructions
-```
+````
 
 Implemented:
 
@@ -402,9 +426,9 @@ The Meals module provides ingredient autocomplete functionality.
 
 Endpoint:
 
-```text
+````text
 GET /api/v1/meals/ingredients/suggestions?search=tom
-```
+````
 
 The endpoint:
 
@@ -416,13 +440,13 @@ The endpoint:
 
 Example response:
 
-```json
+````json
 [
   "Tomato",
   "Tomato Paste",
   "Tomato Sauce"
 ]
-```
+````
 
 ---
 
@@ -434,7 +458,7 @@ No external AI API is required for the current recommendation engine.
 
 The recommendation pipeline is:
 
-```text
+````text
 Profile
    +
 Pantry
@@ -450,7 +474,7 @@ Scoring
 Ranking
    ↓
 Recommended Meals
-```
+````
 
 Recommendations consider:
 
@@ -483,9 +507,9 @@ Allergy conflicts are treated as hard restrictions.
 
 A meal containing an allergy conflict receives:
 
-```text
+````text
 score = 0
-```
+````
 
 The recommendation system is deterministic and explainable, which is useful for evaluation and thesis defense.
 
@@ -497,13 +521,13 @@ The recommendation system can adapt meal ingredients based on pantry availabilit
 
 An ingredient can be classified as:
 
-```text
+````text
 retain
 substitute
 insufficient
 omit
 unavailable
-```
+````
 
 ## Retain
 
@@ -513,7 +537,7 @@ If the pantry and recipe units match, the backend compares quantities.
 
 Example:
 
-```text
+````text
 Required:
 Rice → 500 g
 
@@ -522,7 +546,7 @@ Rice → 1 kg
 
 Result:
 retain
-```
+````
 
 ---
 
@@ -536,7 +560,7 @@ An ingredient is classified as insufficient when:
 
 Example:
 
-```text
+````text
 Required:
 Rice → 1 kg
 
@@ -545,11 +569,11 @@ Rice → 500 g
 
 Result:
 insufficient
-```
+````
 
 Example response:
 
-```json
+````json
 {
   "ingredient": "Rice",
   "action": "insufficient",
@@ -557,7 +581,7 @@ Example response:
   "required_quantity": 1000,
   "unit": "g"
 }
-```
+````
 
 An insufficient ingredient is treated as a soft warning rather than automatically making the meal a fallback candidate.
 
@@ -569,13 +593,13 @@ The backend does not currently perform automatic unit conversion.
 
 Example:
 
-```text
+````text
 Pantry:
 Rice → 1 kg
 
 Recipe:
 Rice → 500 g
-```
+````
 
 Because the units differ, the backend does not attempt to perform an unsafe quantity comparison.
 
@@ -600,7 +624,7 @@ Ingredient substitution rules are stored in the database.
 
 Example:
 
-```text
+````text
 milk
   ↓
 evaporated_milk
@@ -608,15 +632,15 @@ evaporated_milk
 butter
   ↓
 margarine
-```
+````
 
 The substitution system allows the recommendation engine to determine whether an unavailable ingredient can be replaced with another available ingredient.
 
 The database contains an:
 
-```text
+````text
 ingredient_substitutions
-```
+````
 
 table.
 
@@ -640,13 +664,13 @@ The Meal Planner allows authenticated users to schedule meals for specific dates
 
 Each meal plan entry connects:
 
-```text
+````text
 Profile
    ↓
 Meal Plan Entry
    ↓
 Meal
-```
+````
 
 A meal plan entry contains:
 
@@ -658,7 +682,7 @@ A meal plan entry contains:
 
 Example:
 
-```text
+````text
 August 18, 2026
 
 Breakfast
@@ -672,20 +696,20 @@ Chicken Adobo
 Dinner
     ↓
 Vegetable Stir Fry
-```
+````
 
 The database model is:
 
-```text
+````text
 meal_plan_entries
-```
+````
 
 with relationships to:
 
-```text
+````text
 profiles
 meals
-```
+````
 
 The profile relationship uses cascading deletion, while meal deletion is restricted when referenced by a meal-plan entry.
 
@@ -715,7 +739,7 @@ The feature connects the Meal Planner, Meals, and Pantry modules.
 
 The overall flow is:
 
-```text
+````text
 Meal Plan
      ↓
 Planned Meals
@@ -731,7 +755,7 @@ Subtract Available Pantry Quantity
 Remaining Quantity
      ↓
 Grocery List
-```
+````
 
 The Grocery List does **not** introduce a new SQLAlchemy model or database table in the current implementation.
 
@@ -749,7 +773,7 @@ This keeps the grocery list synchronized with the latest:
 
 Unlike database-backed CRUD features, Grocery List uses a lightweight computed architecture:
 
-```text
+````text
 Authenticated User
        ↓
 Profile
@@ -765,17 +789,17 @@ Grocery List Service
 Pantry
        ↓
 Computed Grocery List
-```
+````
 
 The feature structure is:
 
-```text
+````text
 features/
 └── grocery_list/
     ├── schemas.py
     ├── service.py
     └── router.py
-```
+````
 
 No `models/` directory is required for the current computed-only implementation.
 
@@ -791,14 +815,14 @@ The service retrieves the authenticated user's planned meals for the requested d
 
 Example:
 
-```text
+````text
 Monday
   Breakfast → Oatmeal
   Lunch     → Chicken Adobo
 
 Tuesday
   Dinner    → Chicken Adobo
-```
+````
 
 ---
 
@@ -808,7 +832,7 @@ The ingredients of all planned meals are collected.
 
 Example:
 
-```text
+````text
 Oatmeal:
 - Oats       100 g
 - Milk       200 ml
@@ -822,7 +846,7 @@ Chicken Adobo:
 - Chicken    500 g
 - Soy Sauce  50 ml
 - Vinegar    50 ml
-```
+````
 
 ---
 
@@ -832,34 +856,34 @@ Ingredients with the same normalized ingredient name and unit are combined.
 
 Example:
 
-```text
+````text
 Chicken
 500 g
 +
 500 g
 =
 1000 g
-```
+````
 
 Similarly:
 
-```text
+````text
 Soy Sauce
 50 ml
 +
 50 ml
 =
 100 ml
-```
+````
 
 The Grocery List does not combine ingredients with different units.
 
 Example:
 
-```text
+````text
 Rice → 1 kg
 Rice → 500 g
-```
+````
 
 These remain separate because the backend does not currently perform automatic unit conversion.
 
@@ -871,26 +895,26 @@ The aggregated requirements are compared against the user's current pantry.
 
 Example:
 
-```text
+````text
 Required:
 Rice → 2 kg
 
 Pantry:
 Rice → 1 kg
-```
+````
 
 The remaining quantity is:
 
-```text
+````text
 1 kg
-```
+````
 
 Therefore:
 
-```text
+````text
 Grocery List:
 Rice → 1 kg
-```
+````
 
 ---
 
@@ -900,19 +924,19 @@ If the pantry already contains enough of an ingredient under the same unit, the 
 
 Example:
 
-```text
+````text
 Required:
 Eggs → 6 pcs
 
 Pantry:
 Eggs → 12 pcs
-```
+````
 
 Result:
 
-```text
+````text
 No eggs need to be purchased.
-```
+````
 
 ---
 
@@ -924,13 +948,13 @@ Automatic unit conversion is not currently performed.
 
 Example:
 
-```text
+````text
 Required:
 Rice → 500 g
 
 Pantry:
 Rice → 1 kg
-```
+````
 
 Because the units differ, the backend does not automatically subtract the quantities.
 
@@ -944,17 +968,17 @@ The Grocery List response contains information necessary for the frontend to dis
 
 A Grocery List item contains:
 
-```text
+````text
 Ingredient
 Unit
 Required Quantity
 Pantry Quantity
 Quantity to Buy
-```
+````
 
 Conceptually:
 
-```json
+````json
 {
   "ingredient": "Chicken",
   "unit": "g",
@@ -962,7 +986,7 @@ Conceptually:
   "pantry_quantity": 500,
   "quantity_to_buy": 500
 }
-```
+````
 
 The overall response also contains the date range covered by the grocery list.
 
@@ -972,10 +996,10 @@ The overall response also contains the date range covered by the grocery list.
 
 The Grocery List endpoint accepts:
 
-```text
+````text
 start_date
 end_date
-```
+````
 
 The date range determines which planned meals contribute ingredients to the grocery list.
 
@@ -983,17 +1007,17 @@ If no date range is provided, the backend uses the current week.
 
 Example:
 
-```text
+````text
 GET /api/v1/grocery-list
-```
+````
 
 generates the grocery list for the current week.
 
 A specific date range can also be requested:
 
-```text
+````text
 GET /api/v1/grocery-list?start_date=2026-08-18&end_date=2026-08-24
-```
+````
 
 ---
 
@@ -1001,7 +1025,7 @@ GET /api/v1/grocery-list?start_date=2026-08-18&end_date=2026-08-24
 
 The complete Grocery List flow is:
 
-```text
+````text
 Supabase Auth
       ↓
 Authenticated User
@@ -1023,9 +1047,99 @@ Quantity Comparison
 Missing Ingredients
       ↓
 Grocery List
-```
+````
 
 This makes the Grocery List the final derived feature of the Pantry + Meals + Meal Planner workflow.
+
+---
+
+# ⭐ Favorites Module
+
+The Favorites module allows authenticated users to bookmark meals from the meal database for quick access later.
+
+Each favorite connects:
+
+````text
+Profile
+   ↓
+Favorite
+   ↓
+Meal
+````
+
+A favorite contains:
+
+* Meal (nested summary: id, name, estimated cost, image URL)
+* Creation timestamp
+
+The database model is:
+
+````text
+favorites
+````
+
+with relationships to:
+
+````text
+profiles
+meals
+````
+
+Unlike Meal Planner, both the profile and meal relationships use cascading deletion — a favorite is a bookmark, not a scheduling record, so it has no reason to outlive either the user or the meal it points to.
+
+A unique constraint on `(profile_id, meal_id)` prevents the same user from favoriting the same meal twice at the database level.
+
+Implemented:
+
+* Favorite model
+* Unique constraint on profile + meal
+* `meal` relationship (`lazy="joined"`) for eager-loaded meal summaries in responses
+* Pydantic schemas
+* Repository layer
+* Service layer
+* API router
+* Add favorite
+* Retrieve favorites
+* Remove favorite
+* Authenticated-user ownership
+* Idempotent add (favoriting an already-favorited meal returns the existing record instead of raising a conflict)
+* Idempotent remove (un-favoriting a meal that isn't favorited is a no-op instead of a 404)
+
+## Favorites Idempotency
+
+Both the add and remove operations are intentionally idempotent, so the Flutter client's optimistic-UI favorite toggle never has to special-case a race condition or a double-tap.
+
+Add:
+
+````text
+POST /favorites (meal_id: X)
+      ↓
+Already favorited?
+      ├── Yes → return existing favorite
+      └── No  → create new favorite
+````
+
+Remove:
+
+````text
+DELETE /favorites/{meal_id}
+      ↓
+Currently favorited?
+      ├── Yes → delete favorite
+      └── No  → no-op, return 204 anyway
+````
+
+Favorites architecture:
+
+````text
+Authenticated User
+       ↓
+Profile
+       ↓
+Favorites
+       ↓
+PostgreSQL
+````
 
 ---
 
@@ -1033,16 +1147,16 @@ This makes the Grocery List the final derived feature of the Pantry + Meals + Me
 
 All API routes are versioned under:
 
-```text
+````text
 /api/v1
-```
+````
 
 ---
 
 ## Profiles
 
 | Method | Endpoint                    | Description                           |
-| ------ | --------------------------- | ------------------------------------- |
+| ------ | ---------------------------- | -------------------------------------- |
 | POST   | `/api/v1/profiles`          | Create authenticated user's profile   |
 | GET    | `/api/v1/profiles/me`       | Retrieve authenticated user's profile |
 | PUT    | `/api/v1/profiles/me`       | Update authenticated user's profile   |
@@ -1053,7 +1167,7 @@ All API routes are versioned under:
 ## Pantry
 
 | Method | Endpoint              | Description                          |
-| ------ | --------------------- | ------------------------------------ |
+| ------ | ---------------------- | ------------------------------------- |
 | POST   | `/api/v1/pantry`      | Add pantry item                      |
 | GET    | `/api/v1/pantry`      | Retrieve authenticated user's pantry |
 | GET    | `/api/v1/pantry/{id}` | Retrieve pantry item                 |
@@ -1065,7 +1179,7 @@ All API routes are versioned under:
 ## Meals
 
 | Method | Endpoint                                | Description                   |
-| ------ | --------------------------------------- | ----------------------------- |
+| ------ | ---------------------------------------- | ------------------------------ |
 | GET    | `/api/v1/meals`                         | Retrieve available meals      |
 | GET    | `/api/v1/meals/ingredients/suggestions` | Search ingredient suggestions |
 | GET    | `/api/v1/meals/{meal_id}`               | Retrieve meal details         |
@@ -1075,7 +1189,7 @@ All API routes are versioned under:
 ## Recommendations
 
 | Method | Endpoint                  | Description                                |
-| ------ | ------------------------- | ------------------------------------------ |
+| ------ | -------------------------- | -------------------------------------------- |
 | GET    | `/api/v1/recommendations` | Generate personalized meal recommendations |
 
 ---
@@ -1083,7 +1197,7 @@ All API routes are versioned under:
 ## Meal Planner
 
 | Method | Endpoint                    | Description                |
-| ------ | --------------------------- | -------------------------- |
+| ------ | ---------------------------- | ---------------------------- |
 | POST   | `/api/v1/meal-planner`      | Create a meal plan entry   |
 | GET    | `/api/v1/meal-planner`      | Retrieve meal plan entries |
 | GET    | `/api/v1/meal-planner/{id}` | Retrieve a meal plan entry |
@@ -1097,7 +1211,7 @@ Meal Planner routes are protected using the authenticated Supabase user.
 ## Grocery List
 
 | Method | Endpoint                                     | Description                                     |
-| ------ | -------------------------------------------- | ----------------------------------------------- |
+| ------ | ---------------------------------------------- | -------------------------------------------------- |
 | GET    | `/api/v1/grocery-list`                       | Generate grocery list for the current week      |
 | GET    | `/api/v1/grocery-list?start_date=&end_date=` | Generate grocery list for a specific date range |
 
@@ -1105,15 +1219,29 @@ The Grocery List endpoint is protected using the authenticated Supabase user.
 
 The list is calculated dynamically from:
 
-```text
+````text
 Meal Plan
 +
 Meal Ingredients
 +
 Pantry
-```
+````
 
 No grocery-list records are persisted in the database in the current implementation.
+
+---
+
+## Favorites
+
+| Method | Endpoint                    | Description                     |
+| ------ | ----------------------------- | ---------------------------------- |
+| POST   | `/api/v1/favorites`         | Add a meal to favorites (idempotent) |
+| GET    | `/api/v1/favorites`         | Retrieve authenticated user's favorites |
+| DELETE | `/api/v1/favorites/{meal_id}` | Remove a meal from favorites (idempotent) |
+
+Favorites routes are protected using the authenticated Supabase user.
+
+Note the delete endpoint is keyed by `meal_id`, not the favorite's own `id` — the client always knows which meal it's toggling, not the underlying favorite record's identifier.
 
 ---
 
@@ -1121,13 +1249,13 @@ No grocery-list records are persisted in the database in the current implementat
 
 Protected endpoints use:
 
-```text
+````text
 Authorization: Bearer <Supabase Access Token>
-```
+````
 
 The authentication flow is:
 
-```text
+````text
 JWT
  ↓
 get_current_user()
@@ -1137,31 +1265,32 @@ Supabase auth_id
 Profile
  ↓
 User-owned resources
-```
+````
 
 User-specific resources are always scoped to the authenticated user's profile.
 
 For example:
 
-```text
+````text
 Authenticated User
        ↓
 Profile
        ├── Pantry Items
-       └── Meal Plan Entries
-```
+       ├── Meal Plan Entries
+       └── Favorites
+````
 
 The Grocery List also follows this ownership model.
 
 The authenticated user can only generate a Grocery List using:
 
-```text
+````text
 Their Meal Plan
 +
 Their Pantry
-```
+````
 
-A user cannot use another user's profile identifier to retrieve another user's grocery requirements.
+A user cannot use another user's profile identifier to retrieve another user's grocery requirements, meal plan, or favorites.
 
 ---
 
@@ -1173,27 +1302,27 @@ Instead, it reads the latest pantry state when the endpoint is requested.
 
 Therefore:
 
-```text
+````text
 Add Pantry Item
       ↓
 Grocery List recalculates
-```
+````
 
 and:
 
-```text
+````text
 Delete Pantry Item
       ↓
 Grocery List recalculates
-```
+````
 
 Similarly:
 
-```text
+````text
 Change Meal Plan
       ↓
 Grocery List recalculates
-```
+````
 
 This allows the Grocery List to remain a live derived view.
 
@@ -1205,9 +1334,9 @@ Profile images are stored using **Supabase Storage**.
 
 Bucket:
 
-```text
+````text
 profile-images
-```
+````
 
 Supported formats:
 
@@ -1217,13 +1346,13 @@ Supported formats:
 
 Maximum file size:
 
-```text
+````text
 5 MB
-```
+````
 
 Upload flow:
 
-```text
+````text
 Client
    ↓
 POST /profiles/me/image
@@ -1235,7 +1364,7 @@ Supabase Storage
 Public Image URL
    ↓
 Profile.profile_image_url
-```
+````
 
 The Supabase service-role key is used only on the backend.
 
@@ -1251,7 +1380,7 @@ Database provider:
 
 Current application tables include:
 
-```text
+````text
 profiles
    │
    ├── food_allergies
@@ -1266,7 +1395,9 @@ meals
 ingredient_substitutions
 
 meal_plan_entries
-```
+
+favorites
+````
 
 There is currently **no `grocery_list_items` table**.
 
@@ -1274,22 +1405,24 @@ The Grocery List is computed dynamically from existing data.
 
 Main relationships:
 
-```text
+````text
 Profile
  ├── Pantry Items
  ├── Food Allergies
  ├── Disliked Ingredients
- └── Meal Plan Entries
+ ├── Meal Plan Entries
+ └── Favorites
 
 Meal
  ├── Meal Ingredients
  ├── Meal Instructions
- └── Meal Plan Entries
-```
+ ├── Meal Plan Entries
+ └── Favorites
+````
 
 Derived Grocery List:
 
-```text
+````text
 Meal Plan Entries
         +
 Meal Ingredients
@@ -1297,15 +1430,17 @@ Meal Ingredients
 Pantry Items
         ↓
 Computed Grocery List
-```
+````
 
 Foreign keys and cascading behavior are defined at the database level where appropriate.
+
+Meal Plan Entries restrict meal deletion (a meal cannot be deleted while still scheduled), while Favorites cascade on meal deletion (a bookmark to a deleted meal is meaningless and is removed automatically).
 
 ---
 
 # 🔄 Recommendation Data Flow
 
-```text
+````text
 Supabase Auth
       ↓
 Authenticated User
@@ -1356,13 +1491,13 @@ Hybrid Score
 Ranking
       ↓
 Recommended Meals
-```
+````
 
 ---
 
 # 📅 Meal Planning Data Flow
 
-```text
+````text
 Supabase Auth
       ↓
 Authenticated User
@@ -1378,7 +1513,7 @@ Meal Plan Entry
       └── Meal
              ↓
           PostgreSQL
-```
+````
 
 Meal-plan entries are scoped to the authenticated user's profile.
 
@@ -1388,7 +1523,7 @@ Meal-plan entries are scoped to the authenticated user's profile.
 
 The Grocery List completes the meal-planning workflow.
 
-```text
+````text
 Meal Planner
       ↓
 Planned Meals
@@ -1404,11 +1539,11 @@ Subtract Available Quantities
 Missing Ingredients
       ↓
 Grocery List
-```
+````
 
 The overall TipidMeal planning workflow is therefore:
 
-```text
+````text
 Recommendations
       ↓
 Meal Selection
@@ -1418,9 +1553,31 @@ Meal Planner
 Grocery List
       ↓
 Pantry
-```
+````
 
 The Grocery List acts as the bridge between planned meals and shopping requirements.
+
+---
+
+# ⭐ Favorites Data Flow
+
+````text
+Supabase Auth
+      ↓
+Authenticated User
+      ↓
+Profile
+      ↓
+Favorites
+      ↓
+Favorite Entry
+      │
+      └── Meal
+             ↓
+          PostgreSQL
+````
+
+Favorites are scoped to the authenticated user's profile, and provide a lightweight, independent bookmarking path alongside the main Discover → Plan → Shop workflow — a user can favorite a meal without it being scheduled anywhere in their Meal Planner.
 
 ---
 
@@ -1430,45 +1587,67 @@ Backend modules can be independently imported and validated before integration t
 
 Example Meal Planner validation:
 
-```bash
+````bash
 python -c "from features.meal_planner.models import MealPlanEntry; print(MealPlanEntry.__tablename__)"
-```
+````
 
-```bash
+````bash
 python -c "from features.meal_planner.schemas import MealPlanEntryCreate, MealPlanEntryUpdate, MealPlanEntryResponse, WeeklyPlanResponse; print('Meal planner schemas OK')"
-```
+````
 
-```bash
+````bash
 python -c "from features.meal_planner.repository import create_meal_plan_entry, get_meal_plan_entries, get_meal_plan_entry_by_id, update_meal_plan_entry, delete_meal_plan_entry; print('Meal planner repository OK')"
-```
+````
 
-```bash
+````bash
 python -c "from features.meal_planner.service import create_meal_plan_entry, get_meal_plan_entries, get_meal_plan_entry_by_id, update_meal_plan_entry, delete_meal_plan_entry; print('Meal planner service OK')"
-```
+````
 
-```bash
+````bash
 python -c "from features.meal_planner.router import router; print('Meal planner router OK')"
-```
+````
 
 Grocery List validation:
 
-```bash
+````bash
 python -c "from features.grocery_list.schemas import GroceryListItem, GroceryListResponse; print('Grocery list schemas OK')"
-```
+````
 
-```bash
+````bash
 python -c "from features.grocery_list.service import get_grocery_list; print('Grocery list service OK')"
-```
+````
 
-```bash
+````bash
 python -c "from features.grocery_list.router import router; print('Grocery list router OK')"
-```
+````
+
+Favorites validation:
+
+````bash
+python -c "from features.favorites.models import Favorite; print(Favorite.__tablename__)"
+````
+
+````bash
+python -c "from features.favorites.schemas import FavoriteCreate, FavoriteResponse; print('Favorites schemas OK')"
+````
+
+````bash
+python -c "from features.favorites.repository import create_favorite, get_favorite_by_profile_and_meal, get_favorites_by_profile, delete_favorite; print('Favorites repository OK')"
+````
+
+````bash
+python -c "from features.favorites.service import create_favorite, get_favorites_by_profile, delete_favorite; print('Favorites service OK')"
+````
+
+````bash
+python -c "from features.favorites.router import router; print('Favorites router OK')"
+````
 
 The complete FastAPI application can be verified with:
 
-```bash
+````bash
 python -c "from app.main import app; print('FastAPI app OK')"
-```
+````
 
 ---
 
@@ -1478,13 +1657,13 @@ The Grocery List should be tested against the following scenarios.
 
 ### Empty Meal Plan
 
-```text
+````text
 Meal Plan
     ↓
 No planned meals
     ↓
 Empty Grocery List
-```
+````
 
 The endpoint should return an empty list rather than producing an error.
 
@@ -1492,7 +1671,7 @@ The endpoint should return an empty list rather than producing an error.
 
 ### Fully Stocked Pantry
 
-```text
+````text
 Required:
 Rice → 1 kg
 
@@ -1501,13 +1680,13 @@ Rice → 1 kg
 
 Result:
 Nothing to buy
-```
+````
 
 ---
 
 ### Partially Stocked Pantry
 
-```text
+````text
 Required:
 Rice → 2 kg
 
@@ -1516,13 +1695,13 @@ Rice → 1 kg
 
 Result:
 Rice → 1 kg to buy
-```
+````
 
 ---
 
 ### Duplicate Ingredients
 
-```text
+````text
 Meal A:
 Chicken → 500 g
 
@@ -1531,7 +1710,7 @@ Chicken → 500 g
 
 Required:
 Chicken → 1000 g
-```
+````
 
 The duplicate ingredient should be aggregated before pantry subtraction.
 
@@ -1539,13 +1718,13 @@ The duplicate ingredient should be aggregated before pantry subtraction.
 
 ### Different Units
 
-```text
+````text
 Required:
 Rice → 500 g
 
 Pantry:
 Rice → 1 kg
-```
+````
 
 The backend should not perform automatic unit conversion.
 
@@ -1553,7 +1732,7 @@ The backend should not perform automatic unit conversion.
 
 ### User Isolation
 
-```text
+````text
 User A
   ↓
 Meal Plan A
@@ -1561,9 +1740,77 @@ Meal Plan A
 Pantry A
   ↓
 Grocery List A
-```
+````
 
 User A must never receive ingredients derived from User B's meal plan or pantry.
+
+---
+
+# 🧪 Favorites Validation
+
+The Favorites module should be tested against the following scenarios.
+
+### Add New Favorite
+
+````text
+POST /favorites (meal_id: X)
+      ↓
+201 Created
+      ↓
+Favorite returned with nested meal summary
+````
+
+---
+
+### Add Duplicate Favorite
+
+````text
+POST /favorites (meal_id: X)
+      ↓
+Already favorited
+      ↓
+201 Created (same favorite returned, not a 409 conflict)
+````
+
+---
+
+### Remove Existing Favorite
+
+````text
+DELETE /favorites/{meal_id}
+      ↓
+204 No Content
+      ↓
+Favorite no longer appears in GET /favorites
+````
+
+---
+
+### Remove Non-Existent Favorite
+
+````text
+DELETE /favorites/{meal_id}
+      ↓
+Not currently favorited
+      ↓
+204 No Content (no-op, not a 404)
+````
+
+---
+
+### User Isolation
+
+````text
+User A
+  ↓
+Favorites A
+
+User B
+  ↓
+Favorites B
+````
+
+User A must never see or be able to delete User B's favorites.
 
 ---
 
@@ -1573,40 +1820,49 @@ Database schema changes are managed using **Alembic**.
 
 Run all migrations:
 
-```bash
+````bash
 alembic upgrade head
-```
+````
 
 Check the current migration:
 
-```bash
+````bash
 alembic current
-```
+````
 
 Create a migration after modifying SQLAlchemy models:
 
-```bash
+````bash
 alembic revision --autogenerate -m "describe migration"
-```
+````
 
 Always review autogenerated migrations before applying them.
 
 The current database includes the Meal Planner migration:
 
-```text
+````text
 31b00c8d3565
 create meal plan entries
-```
+````
+
+and the Favorites migration:
+
+````text
+2e7b4adc1b5d
+create favorites table
+````
 
 The Grocery List feature does **not** require a new migration because the current implementation does not introduce a database model or table.
 
 Migration chain:
 
-```text
+````text
 Ingredient Substitutions
         ↓
 Meal Plan Entries
-```
+        ↓
+Favorites
+````
 
 ---
 
@@ -1614,35 +1870,35 @@ Meal Plan Entries
 
 Clone the repository:
 
-```bash
+````bash
 git clone https://github.com/<username>/TipidMeal-Backend.git
-```
+````
 
 Create a virtual environment:
 
-```bash
+````bash
 python -m venv venv
-```
+````
 
 Activate it.
 
 Windows:
 
-```bash
+````bash
 venv\Scripts\activate
-```
+````
 
 Install dependencies:
 
-```bash
+````bash
 pip install -r requirements.txt
-```
+````
 
 Create a `.env` file.
 
 Example:
 
-```env
+````env
 PROJECT_NAME=TipidMeal API
 PROJECT_VERSION=1.0.0
 API_V1_PREFIX=/api/v1
@@ -1653,7 +1909,7 @@ DATABASE_URL=your_database_url
 
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-```
+````
 
 Never commit `.env` or Supabase secrets to the repository.
 
@@ -1663,15 +1919,15 @@ Never commit `.env` or Supabase secrets to the repository.
 
 Start the development server:
 
-```bash
+````bash
 uvicorn app.main:app --reload
-```
+````
 
 The API will be available at:
 
-```text
+````text
 http://127.0.0.1:8000
-```
+````
 
 ---
 
@@ -1679,15 +1935,15 @@ http://127.0.0.1:8000
 
 Swagger UI:
 
-```text
+````text
 http://127.0.0.1:8000/docs
-```
+````
 
 ReDoc:
 
-```text
+````text
 http://127.0.0.1:8000/redoc
-```
+````
 
 Swagger UI can be used to inspect and manually test API endpoints.
 
@@ -1697,7 +1953,7 @@ Swagger UI can be used to inspect and manually test API endpoints.
 
 The current backend implementation includes:
 
-```text
+````text
 Authentication                  ✅
 Supabase JWT Verification       ✅
 Profile Management              ✅
@@ -1727,8 +1983,13 @@ Grocery List Unit Safety         ✅
 Grocery List Date Range          ✅
 Grocery List Authentication      ✅
 Grocery List User Isolation      ✅
+Favorites                        ✅
+Favorites CRUD (Add/List/Remove) ✅
+Favorites Idempotency            ✅
+Favorites Authentication         ✅
+Favorites User Isolation         ✅
 Alembic Migrations               ✅
-```
+````
 
 The backend currently provides the core API and database functionality required by the TipidMeal application.
 
@@ -1740,7 +2001,7 @@ The recommendation engine is intentionally deterministic.
 
 The current system uses:
 
-```text
+````text
 Profile
 +
 Pantry
@@ -1754,7 +2015,7 @@ Business Rules
 TF-IDF Ingredient Coverage
 +
 Weighted Scoring
-```
+````
 
 This approach provides predictable and explainable recommendations.
 
@@ -1766,14 +2027,14 @@ An external AI API is not required for the current recommendation implementation
 
 The current backend supports the following overall application workflow:
 
-```text
+````text
                     Supabase Auth
                          ↓
                       Profile
                          ↓
-        ┌────────────────┼────────────────┐
-        ↓                ↓                ↓
-     Pantry            Meals        Recommendations
+        ┌────────────────┼────────────────┬──────────────┐
+        ↓                ↓                ↓              ↓
+     Pantry            Meals        Recommendations   Favorites
         │                │                │
         │                └────────────────┘
         │                         ↓
@@ -1790,14 +2051,14 @@ The current backend supports the following overall application workflow:
                        Missing Ingredients
                                 ↓
                              Shopping
-```
+````
 
 This creates the core TipidMeal workflow:
 
-```text
+````text
 Discover
    ↓
-Plan
+Plan (or Favorite for later)
    ↓
 Check Pantry
    ↓
@@ -1806,7 +2067,7 @@ Generate Grocery List
 Shop
    ↓
 Cook
-```
+````
 
 ---
 
