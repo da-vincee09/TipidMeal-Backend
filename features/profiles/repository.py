@@ -2,7 +2,7 @@ from profiles.models.profile import Profile
 from uuid import UUID
 from features.profiles.models.food_allergy import FoodAllergy
 from features.profiles.models.disliked_ingredient import DislikedIngredient
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, joinedload
 from features.profiles.schemas import ProfileCreate, ProfileUpdate
 
 
@@ -56,8 +56,8 @@ def get_profile_by_auth_id(
     return (
     db.query(Profile)
     .options(
-        selectinload(Profile.food_allergies),
-        selectinload(Profile.disliked_ingredients), 
+        joinedload(Profile.food_allergies),
+        joinedload(Profile.disliked_ingredients),
     )
     .filter(
         Profile.auth_id == auth_id

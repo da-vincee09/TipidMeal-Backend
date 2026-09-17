@@ -1,5 +1,5 @@
 from uuid import UUID
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, joinedload
 from features.meals.models.meal import Meal
 from features.meals.schemas import (
     MealCreate,
@@ -82,9 +82,9 @@ def get_meals(
 
     return (
         db.query(Meal)
-       .options(
-            selectinload(Meal.ingredients),
-            selectinload(Meal.instructions),
+        .options(
+            joinedload(Meal.ingredients),
+            joinedload(Meal.instructions),
         )
         .all()
     )
@@ -134,8 +134,8 @@ def get_meal_by_id(
     return (
         db.query(Meal)
         .options(
-            selectinload(Meal.ingredients),
-            selectinload(Meal.instructions),
+            joinedload(Meal.ingredients),
+            joinedload(Meal.instructions),
         )
         .filter(
             Meal.id == meal_id,
