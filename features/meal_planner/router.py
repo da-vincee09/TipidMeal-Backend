@@ -1,6 +1,6 @@
 from uuid import UUID
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import (
     APIRouter,
@@ -90,7 +90,7 @@ def get_meal_plan_entries(
     estimated_cost_total = sum(
         (entry.meal.estimated_cost for entry in entries),
         Decimal("0"),
-    )
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     return {
         "entries": entries,

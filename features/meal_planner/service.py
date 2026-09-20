@@ -4,6 +4,7 @@ from datetime import date
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from core.utils import is_planned_slot_in_past
 from features.meal_planner import repository
 from features.meal_planner.models.meal_plan_entry import MealPlanEntry
 from features.meal_planner.schemas import (
@@ -28,6 +29,12 @@ def create_meal_plan_entry(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Meal not found",
+        )
+
+    if is_planned_slot_in_past(entry_data.planned_date, entry_data.meal_slot):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot add a meal to a slot that has already passed",
         )
 
     return repository.create_meal_plan_entry(
@@ -101,6 +108,16 @@ def update_meal_plan_entry(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Meal not found",
+            )
+
+    if "planned_date" in update_data or "meal_slot" in update_data:
+        effective_date = update_data.get("planned_date", entry.planned_date)
+        effective_slot = update_data.get("meal_slot", entry.meal_slot)
+
+        if is_planned_slot_in_past(effective_date, effective_slot):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot add a meal to a slot that has already passed",
             )
 
     meal_id = update_data.get("meal_id")
