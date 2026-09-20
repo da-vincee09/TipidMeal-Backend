@@ -18,6 +18,7 @@ Built with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL (Supabase)**, **Supabas
 - **Alembic** – Database migrations
 - **python-jose** – JWT verification
 - **python-multipart** – Multipart/form-data parsing for image uploads
+- **tzdata** – IANA timezone database (required on Windows; see Installation)
 
 ---
 
@@ -33,8 +34,10 @@ backend/
 │
 ├── core/
 │   ├── config.py
+│   ├── constants.py
 │   ├── database.py
-│   └── dependencies.py
+│   ├── dependencies.py
+│   └── utils.py
 │
 ├── features/
 │   │
@@ -191,7 +194,7 @@ Grocery List
 Favorites
 ````
 
-Shared functionality such as authentication, database configuration, storage, and common schemas is placed inside `shared/`.
+Shared functionality such as authentication, database configuration, storage, and common schemas is placed inside `shared/`. App-wide constants (e.g. timezone-sensitive cutoffs) live in `core/constants.py`, with small pure helper functions in `core/utils.py`.
 
 ---
 
@@ -417,6 +420,8 @@ Implemented:
 * Ingredient relationships
 * Instruction relationships
 * Ingredient suggestion search
+
+`Meal.estimated_cost` is stored as `Numeric(10, 2)` (not `Float`), and the Pydantic schemas type it as `Decimal` end-to-end — this avoids floating-point rounding artifacts at the source, rather than only masking them at display time. See "Peso Precision (Week 7)" below.
 
 ---
 
@@ -728,6 +733,28 @@ Implemented:
 * Authenticated-user ownership
 * Date-based meal planning
 * Meal-slot support
+* Past-date/slot rejection on create and update (see below)
+
+## Past-Date/Slot Guard (Week 7)
+
+A meal plan entry cannot be created or moved into a date/slot that has already passed.
+
+- Any `planned_date` before today (server `TIMEZONE=Asia/Manila`) is rejected.
+- For `planned_date == today`, each meal slot has its own cutoff:
+
+  | Slot      | Cutoff   |
+  |-----------|----------|
+  | Breakfast | 10:00 AM |
+  | Lunch     | 2:00 PM  |
+  | Dinner    | 9:00 PM  |
+
+- Cutoff constants live in `core/constants.py`; the check itself is `core/utils.is_planned_slot_in_past()`, called from `service.create_meal_plan_entry()` and `service.update_meal_plan_entry()`.
+- Editing an already-past entry without changing its date/slot is still allowed — only a move *into* a past date/slot is rejected.
+- Rejected requests return `400` with `{"detail": "Cannot add a meal to a slot that has already passed"}`.
+
+## Peso Precision (Week 7)
+
+`estimated_cost_total` in the weekly Meal Planner response is explicitly quantized to 2 decimal places server-side (`Decimal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)`) before serialization, preventing raw floating-point rounding artifacts (e.g. `45.500000000000004`) from reaching the client. Individual `Meal.estimated_cost` values are already stored as `Numeric(10, 2)` end-to-end, so no artifacts are possible there.
 
 ---
 
@@ -1198,10 +1225,10 @@ All API routes are versioned under:
 
 | Method | Endpoint                    | Description                |
 | ------ | ---------------------------- | ---------------------------- |
-| POST   | `/api/v1/meal-planner`      | Create a meal plan entry   |
+| POST   | `/api/v1/meal-planner`      | Create a meal plan entry (rejects past date/slot) |
 | GET    | `/api/v1/meal-planner`      | Retrieve meal plan entries |
 | GET    | `/api/v1/meal-planner/{id}` | Retrieve a meal plan entry |
-| PUT    | `/api/v1/meal-planner/{id}` | Update a meal plan entry   |
+| PUT    | `/api/v1/meal-planner/{id}` | Update a meal plan entry (rejects a move into a past date/slot) |
 | DELETE | `/api/v1/meal-planner/{id}` | Delete a meal plan entry   |
 
 Meal Planner routes are protected using the authenticated Supabase user.
@@ -1607,6 +1634,10 @@ python -c "from features.meal_planner.service import create_meal_plan_entry, get
 python -c "from features.meal_planner.router import router; print('Meal planner router OK')"
 ````
 
+````bash
+python -c "from core.utils import is_planned_slot_in_past, get_app_now; print('Core utils OK')"
+````
+
 Grocery List validation:
 
 ````bash
@@ -1814,6 +1845,52 @@ User A must never see or be able to delete User B's favorites.
 
 ---
 
+# 🧪 Meal Planner Past-Slot Guard Validation (Week 7)
+
+### Yesterday
+
+````text
+POST /meal-planner (planned_date: yesterday)
+      ↓
+400 Bad Request
+      ↓
+"Cannot add a meal to a slot that has already passed"
+````
+
+### Today, Slot Cutoff Already Passed
+
+````text
+POST /meal-planner (planned_date: today, meal_slot: breakfast, now > 10:00 AM)
+      ↓
+400 Bad Request
+````
+
+### Today, Slot Still Open / Any Future Date
+
+````text
+POST /meal-planner (planned_date: today, meal_slot: dinner, now < 9:00 PM)
+      ↓
+201 Created
+````
+
+### Editing an Already-Past Entry Without Moving It
+
+````text
+PUT /meal-planner/{id} (meal_id changed only, planned_date/meal_slot unchanged, already in the past)
+      ↓
+200 OK — not blocked
+````
+
+### Editing an Entry Into the Past
+
+````text
+PUT /meal-planner/{id} (planned_date moved to yesterday)
+      ↓
+400 Bad Request
+````
+
+---
+
 # 🗃️ Database Migrations
 
 Database schema changes are managed using **Alembic**.
@@ -1852,7 +1929,7 @@ and the Favorites migration:
 create favorites table
 ````
 
-The Grocery List feature does **not** require a new migration because the current implementation does not introduce a database model or table.
+The Grocery List feature does **not** require a new migration because the current implementation does not introduce a database model or table. The Week 7 past-slot guard and peso-precision fixes are also migration-free — both are application-layer logic, not schema changes.
 
 Migration chain:
 
@@ -1893,6 +1970,13 @@ Install dependencies:
 ````bash
 pip install -r requirements.txt
 ````
+
+> **Windows users:** Python's `zoneinfo` relies on the OS having an IANA
+> timezone database, which Windows doesn't ship with (unlike Linux/macOS).
+> Install the `tzdata` package (already listed in `requirements.txt`) or
+> any `TIMEZONE`-dependent code — such as the Meal Planner past-slot guard
+> in `core/utils.py` — will raise `ZoneInfoNotFoundError: 'No time zone
+> found with key Asia/Manila'` at request time.
 
 Create a `.env` file.
 
@@ -1976,6 +2060,8 @@ Meal Planner                     ✅
 Meal Plan CRUD                   ✅
 Meal Plan Authentication         ✅
 Meal Plan User Isolation         ✅
+Meal Plan Past-Slot Guard        ✅
+Peso Precision (Weekly Total)    ✅
 Grocery List                     ✅
 Grocery List Aggregation         ✅
 Grocery List Pantry Comparison   ✅
