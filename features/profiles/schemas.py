@@ -1,7 +1,8 @@
 from datetime import datetime, date
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+from features.profiles.models.profile import CookingSkillLevel, PhysicalActivityLevel
 
 # Used when creating a profile
 class ProfileCreate(BaseModel):
@@ -25,7 +26,23 @@ class ProfileCreate(BaseModel):
         gt=0
     )
 
-    cooking_skill_level: str
+    cooking_skill_level: CookingSkillLevel
+
+    @field_validator("cooking_skill_level", mode="before")
+    @classmethod
+    def normalize_skill_level(cls, value):
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    physical_activity_level: PhysicalActivityLevel
+
+    @field_validator("physical_activity_level", mode="before")
+    @classmethod
+    def normalize_activity_level(cls, value):
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
     food_allergies: list[str] = Field(default_factory=list)
     disliked_ingredients: list[str] = Field(default_factory=list)
@@ -56,7 +73,23 @@ class ProfileUpdate(BaseModel):
         gt=0
     )
 
-    cooking_skill_level: str | None = None
+    cooking_skill_level: CookingSkillLevel | None = None
+
+    @field_validator("cooking_skill_level", mode="before")
+    @classmethod
+    def normalize_skill_level(cls, value):
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    physical_activity_level: PhysicalActivityLevel | None = None
+
+    @field_validator("physical_activity_level", mode="before")
+    @classmethod
+    def normalize_activity_level(cls, value):
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
     food_allergies: list[str] | None = None
     disliked_ingredients: list[str] | None = None
@@ -94,7 +127,9 @@ class ProfileResponse(BaseModel):
 
     daily_budget: float
 
-    cooking_skill_level: str
+    cooking_skill_level: CookingSkillLevel
+
+    physical_activity_level: PhysicalActivityLevel | None = None
 
     food_allergies: list[FoodAllergyResponse]
     disliked_ingredients: list[DislikedIngredientResponse]

@@ -120,14 +120,7 @@ def calculate_hybrid_score(
     skill_score: float,
     allergy_score: float,
     disliked_score: float,
-    adaptation_decision: str,
 ) -> float:
-
-    if allergy_score == 0.0:
-        return 0.0
-
-    if adaptation_decision == "fallback":
-        return 0.0
 
     return (
         coverage * 0.30

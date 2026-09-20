@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from shared.database.base import Base
 from datetime import date
+from enum import Enum
 
 if TYPE_CHECKING:
     from .food_allergy import FoodAllergy
@@ -15,6 +16,19 @@ if TYPE_CHECKING:
 
 if TYPE_CHECKING:
      from ...pantry.models.pantry_item import PantryItem
+
+
+class CookingSkillLevel(str, Enum):
+    BEGINNER = "beginner"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+
+
+class PhysicalActivityLevel(str, Enum):
+    SEDENTARY = "sedentary"
+    MODERATELY_ACTIVE = "moderately_active"
+    ACTIVE = "active"
+
 
 class Profile(Base):
     __tablename__="profiles"
@@ -63,6 +77,11 @@ class Profile(Base):
     cooking_skill_level: Mapped[str] = mapped_column(
         String(50),
         nullable=False
+    )
+
+    physical_activity_level: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
     )
 
     food_allergies: Mapped[list["FoodAllergy"]] = relationship(

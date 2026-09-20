@@ -1,4 +1,4 @@
-from profiles.models.profile import Profile
+from features.profiles.models.profile import Profile
 from uuid import UUID
 from features.profiles.models.food_allergy import FoodAllergy
 from features.profiles.models.disliked_ingredient import DislikedIngredient
@@ -21,6 +21,7 @@ def create_profile(
         sex=profile_data.sex,
         daily_budget=profile_data.daily_budget,
         cooking_skill_level=profile_data.cooking_skill_level,
+        physical_activity_level=profile_data.physical_activity_level,
     )
 
     db.add(profile)

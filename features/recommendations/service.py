@@ -50,6 +50,7 @@ def get_available_ingredients(
 def calculate_meal_coverage(
     db: Session,
     profile_id,
+    sort_by: str = "score",
 ):
     profile = (
         db.query(Profile)
@@ -79,18 +80,23 @@ def calculate_meal_coverage(
 
     for index, meal in enumerate(meals):
 
-        # 1. Determine whether the meal can be prepared
-        #    using available ingredients/substitutions.
+        # 1. Affordability gate — hard requirement, independent of
+        #    pantry match. A meal the user can't afford is never
+        #    recommended, no matter how well it adapts from pantry.
+        is_affordable = float(meal.estimated_cost) <= float(profile.daily_budget)
+
+        if not is_affordable:
+            continue
+
+        # 2. Determine pantry adaptation — no longer gates inclusion,
+        #    only informs tiering/display (see sort step below).
         adaptation = adapt_meal(
             db,
             meal.ingredients,
             available_ingredients,
         )
 
-        if adaptation["decision"] == "fallback":
-            continue
-
-        # 2. Calculate effective ingredients after substitutions.
+        # 3. Calculate effective ingredients after substitutions.
         effective_ingredients = (
             get_effective_available_ingredients(
                 db,
@@ -99,7 +105,7 @@ def calculate_meal_coverage(
             )
         )
 
-        # 3. Calculate pantry ingredient coverage.
+        # 4. Calculate pantry ingredient coverage.
         coverage = (
             engine.calculate_weighted_ingredient_coverage(
                 index,
@@ -112,19 +118,19 @@ def calculate_meal_coverage(
             for ingredient in meal.ingredients
         ]
 
-        # 4. Get user's allergies.
+        # 5. Get user's allergies.
         allergies = [
             allergy.allergy
             for allergy in profile.food_allergies
         ]
 
-        # 5. Get user's disliked ingredients.
+        # 6. Get user's disliked ingredients.
         disliked_ingredients = [
             disliked.ingredient
             for disliked in profile.disliked_ingredients
         ]
 
-        # 6. Calculate individual scores.
+        # 7. Calculate individual scores.
         budget_score = calculate_budget_score(
             float(meal.estimated_cost),
             float(profile.daily_budget),
@@ -147,18 +153,18 @@ def calculate_meal_coverage(
             )
         )
 
-        # 7. Never recommend a meal containing an allergen.
+        # 8. Never recommend a meal containing an allergen —
+        #    hard filter, unchanged.
         if allergy_score == 0.0:
             continue
 
-        # 8. Calculate final hybrid score.
+        # 9. Calculate final hybrid score.
         hybrid_score = calculate_hybrid_score(
             float(coverage),
             budget_score,
             skill_score,
             allergy_score,
             disliked_score,
-            adaptation["decision"],
         )
 
         recommendations.append(
@@ -174,10 +180,22 @@ def calculate_meal_coverage(
             }
         )
 
-    recommendations.sort(
-        key=lambda item: item["hybrid_score"],
-        reverse=True,
-    )
+    if sort_by == "cost":
+        recommendations.sort(
+            key=lambda item: (
+                item["meal"].estimated_cost,
+                -item["hybrid_score"],
+            )
+        )
+    else:
+        # Default "score" sort: tier good pantry match ("adapt")
+        # ahead of "fallback" — everything here is already affordable —
+        # then hybrid score breaks ties within each tier.
+        recommendations.sort(
+            key=lambda item: (
+                item["adaptation"]["decision"] != "adapt",
+                -item["hybrid_score"],
+            )
+        )
 
     return recommendations
-

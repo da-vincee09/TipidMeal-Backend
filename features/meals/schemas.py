@@ -1,7 +1,8 @@
 from uuid import UUID
 from datetime import datetime
 from decimal import Decimal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from features.meals.models.meal import MealDifficulty
 
 class MealIngredientCreate(BaseModel):
     ingredient: str = Field(
@@ -68,10 +69,14 @@ class MealCreate(BaseModel):
         gt=0,
     )
 
-    difficulty: str = Field(
-        min_length=1,
-        max_length=50,
-    )
+    difficulty: MealDifficulty
+
+    @field_validator("difficulty", mode="before")
+    @classmethod
+    def normalize_difficulty(cls, value):
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
     servings: int = Field(
         gt=0,
@@ -104,11 +109,14 @@ class MealUpdate(BaseModel):
         gt=0,
     )
 
-    difficulty: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=50,
-    )
+    difficulty: MealDifficulty | None = None
+    
+    @field_validator("difficulty", mode="before")
+    @classmethod
+    def normalize_difficulty(cls, value):
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
     servings: int | None = Field(
         default=None,
@@ -130,7 +138,7 @@ class MealResponse(BaseModel):
     image_url: str | None
     estimated_cost: Decimal
     cooking_time: int
-    difficulty: str
+    difficulty: MealDifficulty
     servings: int
     calories: int | None
     created_at: datetime

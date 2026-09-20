@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from typing import Literal
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from core.dependencies import get_db
@@ -20,6 +22,10 @@ router = APIRouter(
     response_model=RecommendationListResponse,
 )
 def get_recommendations(
+    sort_by: Literal["score", "cost"] = Query(
+        "score",
+        description="Ranking basis: 'score' (default, hybrid score, tiered by pantry match) or 'cost' (lowest estimated cost first)",
+    ),
     auth_id = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -36,6 +42,7 @@ def get_recommendations(
     recommendations = service.calculate_meal_coverage(
         db,
         profile.id,
+        sort_by=sort_by,
     )
 
     return {

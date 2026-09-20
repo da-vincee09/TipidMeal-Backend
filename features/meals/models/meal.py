@@ -7,11 +7,18 @@ from sqlalchemy import DateTime, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from shared.database.base import Base
+from enum import Enum
 
 
 if TYPE_CHECKING:
     from .meal_ingredient import MealIngredient
     from .meal_instruction import MealInstruction
+
+
+class MealDifficulty(str, Enum):
+    EASY = "easy"
+    MEDIUM = "medium"
+    HARD = "hard"
 
 
 class Meal(Base):

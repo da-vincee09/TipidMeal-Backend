@@ -253,6 +253,7 @@ Profile fields include:
 * Sex
 * Daily Budget
 * Cooking Skill Level
+* Physical Activity Level
 * Food Allergies
 * Disliked Ingredients
 
@@ -266,6 +267,7 @@ Implemented:
 * Profile image upload
 * Supabase Storage integration
 * Authenticated-user ownership
+* Physical activity level (Week 7 — see below)
 
 Profile architecture:
 
@@ -278,6 +280,16 @@ Profile
 ````
 
 The profile data is used by the recommendation system to personalize meal recommendations.
+
+## Physical Activity Level (Week 7)
+
+A `physical_activity_level` column was added to `Profile` as groundwork for Week 8's Nutrition feature (PDRI-based caloric bracket calculation).
+
+- **Enum:** `sedentary`, `moderately_active`, `active` — a 3-category scheme matching the PDRI's own activity classification.
+- **Required on profile creation.** `ProfileCreate.physical_activity_level` has no default and is not `Optional` — every new profile must specify it. This is a deliberate product decision made during implementation.
+- The database column itself is nullable (`String(50)`, `nullable=True`) purely so pre-existing profiles created before this migration don't violate a NOT NULL constraint retroactively — but the API enforces it as required for any newly-created profile going forward. `ProfileUpdate` and `ProfileResponse` keep it optional so partial updates and pre-Week-7 rows still round-trip correctly.
+- Migration: `aa4a5f458607_add_physical_activity_level_to_profiles.py`.
+- **Not currently used anywhere in recommendation scoring** — the hybrid score is unchanged (Coverage/Budget/Skill/Allergy/Disliked, see Recommendation Scoring below). This field exists solely to support Week 8's calorie-need calculation.
 
 ---
 
@@ -421,7 +433,11 @@ Implemented:
 * Instruction relationships
 * Ingredient suggestion search
 
-`Meal.estimated_cost` is stored as `Numeric(10, 2)` (not `Float`), and the Pydantic schemas type it as `Decimal` end-to-end — this avoids floating-point rounding artifacts at the source, rather than only masking them at display time. See "Peso Precision (Week 7)" below.
+`Meal.estimated_cost` is stored as `Numeric(10, 2)` (not `Float`), and the Pydantic schemas type it as `Decimal` end-to-end — this avoids floating-point rounding artifacts at the source, rather than only masking them at display time. See "Peso Precision (Week 7)" under the Meal Planner Module below.
+
+`Meal.difficulty` is a free `String(50)` with no enum constraint at the database level. The recommendation engine's skill-scoring table (see Recommendation Scoring below) expects exactly `easy`, `medium`, or `hard` (case-insensitive); any other value would score `0.0` regardless of the user's skill level, since it wouldn't match a key in the compatibility table. All 20 currently seeded meals were checked and confirmed to use exactly one of these three values (Week 7, Day 3).
+
+> ⚠️ **Known gap (Week 7, not yet done):** `Meal.servings` and the associated ingredient quantities/cost/calories in the current seed data are **sample data** and have not yet been normalized to represent exactly 1 serving. This is Week 7 Part 5 / Day 4 and is still outstanding.
 
 ---
 
@@ -472,11 +488,15 @@ Meals
    +
 Recommendation Rules
    ↓
+Affordability Filter (hard — Week 7)
+   ↓
 Ingredient Adaptation
    ↓
 Scoring
    ↓
-Ranking
+Allergy Filter (hard)
+   ↓
+Ranking / Sort
    ↓
 Recommended Meals
 ````
@@ -494,6 +514,12 @@ Recommendations consider:
 * Disliked ingredients
 * Ingredient coverage
 
+## Affordability (Week 7 — hard filter)
+
+As of Week 7, any meal whose `estimated_cost` exceeds the user's `daily_budget` is excluded from the recommendation list entirely, before ingredient adaptation, coverage, or scoring are calculated. This is a deliberate product decision made during implementation, stricter than the system's original design, in which Budget Compatibility was only a 30%-weighted *scored* factor (see Recommendation Scoring below) rather than a pass/fail gate. The 30% weight still differentiates among the meals that pass this gate — it just no longer decides, on its own, whether an over-budget meal can appear at all.
+
+One practical effect: `calculate_budget_score()`'s two lowest tiers (`ratio 1.00–1.25 → 0.50` and `ratio > 1.25 → 0.00`) can no longer be reached in production, since anything with `ratio > 1.00` is already excluded upstream by this filter.
+
 ---
 
 # 📊 Recommendation Scoring
@@ -508,6 +534,8 @@ The current hybrid scoring system uses:
 | Allergy Compatibility |    20% |
 | Disliked Ingredients  |    10% |
 
+This weighting applies only to meals that already pass the Week 7 affordability hard filter above — Budget Compatibility's 30% now differentiates *among* affordable meals rather than being the sole signal keeping over-budget meals out.
+
 Allergy conflicts are treated as hard restrictions.
 
 A meal containing an allergy conflict receives:
@@ -516,7 +544,41 @@ A meal containing an allergy conflict receives:
 score = 0
 ````
 
+and is excluded from the response entirely.
+
 The recommendation system is deterministic and explainable, which is useful for evaluation and thesis defense.
+
+## Cost-Based Sort (Week 7)
+
+`GET /api/v1/recommendations` accepts an optional `sort_by` query parameter:
+
+````text
+GET /api/v1/recommendations?sort_by=score   (default)
+GET /api/v1/recommendations?sort_by=cost
+````
+
+- **`sort_by=score`** (default): meals are tiered by pantry-adaptation decision (`adapt` before `fallback`), then ordered by hybrid score descending within each tier.
+- **`sort_by=cost`**: meals are ordered by `estimated_cost` ascending, with hybrid score descending as a tiebreaker. Pantry-adaptation tiering is not applied in this mode.
+- In both modes, the affordability and allergy hard filters above are applied identically first — `sort_by` only changes ordering among meals that already qualify.
+- Verification method: manual testing through the app and Swagger against the 20 seeded meals, not an automated test suite — no unit tests currently exist for `scoring.py`.
+
+## Cooking Skill Scoring (verified, Week 7)
+
+Skill compatibility uses a fixed table, not a linear formula:
+
+| User Skill \ Meal Difficulty | Easy | Medium | Hard |
+|---|---|---|---|
+| Beginner | 1.00 | 0.60 | 0.20 |
+| Intermediate | 1.00 | 1.00 | 0.60 |
+| Advanced | 1.00 | 1.00 | 1.00 |
+
+This was manually verified against all 20 seeded meals to confirm:
+- A skill mismatch degrades the score smoothly rather than zeroing it out.
+- Beginner+Hard (0.20) scores lower than Beginner+Medium (0.60), which scores lower than Beginner+Easy (1.00) — the gap is proportionate to how far apart the levels are, not just "match vs. no match."
+- An Advanced-skill user is never penalized for any difficulty, including Easy meals.
+- Skill mismatch only reduces score when the meal is *harder* than the user's skill — never when it's easier.
+
+All 20 seeded `Meal.difficulty` values were confirmed to be exactly `easy`, `medium`, or `hard` (case-insensitive), so no meal silently falls outside this table.
 
 ---
 
@@ -533,6 +595,15 @@ insufficient
 omit
 unavailable
 ````
+
+Meals are classified as either:
+
+````text
+adapt
+fallback
+````
+
+**Week 7 change:** `fallback` meals are no longer excluded from the recommendation response. They are still returned to the client, just tiered *after* `adapt` meals under the default `sort_by=score` ordering (see Cost-Based Sort above). This differs from the feature's original design.
 
 ## Retain
 
@@ -619,7 +690,7 @@ An ingredient is classified as unavailable when:
 * It is not present in the pantry.
 * No valid substitution is available.
 
-Unavailable required ingredients can cause a meal to become a fallback candidate.
+Unavailable required ingredients can cause a meal to become a `fallback` candidate — which, as of Week 7, is still returned to the client rather than filtered out (see above).
 
 ---
 
@@ -1184,7 +1255,7 @@ All API routes are versioned under:
 
 | Method | Endpoint                    | Description                           |
 | ------ | ---------------------------- | -------------------------------------- |
-| POST   | `/api/v1/profiles`          | Create authenticated user's profile   |
+| POST   | `/api/v1/profiles`          | Create authenticated user's profile (requires `physical_activity_level`) |
 | GET    | `/api/v1/profiles/me`       | Retrieve authenticated user's profile |
 | PUT    | `/api/v1/profiles/me`       | Update authenticated user's profile   |
 | POST   | `/api/v1/profiles/me/image` | Upload/replace profile picture        |
@@ -1215,9 +1286,10 @@ All API routes are versioned under:
 
 ## Recommendations
 
-| Method | Endpoint                  | Description                                |
-| ------ | -------------------------- | -------------------------------------------- |
-| GET    | `/api/v1/recommendations` | Generate personalized meal recommendations |
+| Method | Endpoint                                | Description                                |
+| ------ | ----------------------------------------- | -------------------------------------------- |
+| GET    | `/api/v1/recommendations`               | Generate personalized meal recommendations (default `sort_by=score`) |
+| GET    | `/api/v1/recommendations?sort_by=cost`  | Same, ordered by estimated cost ascending  |
 
 ---
 
@@ -1494,6 +1566,8 @@ Meals
       └── Difficulty
       │
       ↓
+Affordability Filter (hard, Week 7)
+      ↓
 Ingredient Adaptation
       │
       ├── Retain
@@ -1509,13 +1583,13 @@ Budget Score
       ↓
 Skill Score
       ↓
-Allergy Filtering
+Allergy Filtering (hard)
       ↓
 Disliked Ingredient Score
       ↓
 Hybrid Score
       ↓
-Ranking
+Ranking / Sort (score or cost — Week 7)
       ↓
 Recommended Meals
 ````
@@ -1674,11 +1748,37 @@ python -c "from features.favorites.service import create_favorite, get_favorites
 python -c "from features.favorites.router import router; print('Favorites router OK')"
 ````
 
+Recommendations validation:
+
+````bash
+python -c "from features.recommendations.service import calculate_meal_coverage; print('Recommendations service OK')"
+````
+
+````bash
+python -c "from features.recommendations.scoring import calculate_budget_score, calculate_skill_score, calculate_allergy_score, calculate_disliked_ingredient_score, calculate_hybrid_score; print('Recommendations scoring OK')"
+````
+
+````bash
+python -c "from features.recommendations.router import router; print('Recommendations router OK')"
+````
+
+Profiles validation:
+
+````bash
+python -c "from features.profiles.models.profile import Profile, CookingSkillLevel, PhysicalActivityLevel; print('Profile model OK')"
+````
+
+````bash
+python -c "from features.profiles.schemas import ProfileCreate, ProfileUpdate, ProfileResponse; print('Profile schemas OK')"
+````
+
 The complete FastAPI application can be verified with:
 
 ````bash
 python -c "from app.main import app; print('FastAPI app OK')"
 ````
+
+> **Note:** No automated unit tests currently exist for `scoring.py` or the recommendation pipeline (Week 7). Skill scoring, cost sort, and the affordability filter have all been verified manually through Swagger and the running app, against the 20 seeded meals, rather than with `pytest`.
 
 ---
 
@@ -1891,6 +1991,49 @@ PUT /meal-planner/{id} (planned_date moved to yesterday)
 
 ---
 
+# 🧪 Recommendations Validation (Week 7)
+
+### Affordability Hard Filter
+
+````text
+Meal cost > profile.daily_budget
+      ↓
+Excluded from response entirely — never scored or returned
+````
+
+### Cost Sort
+
+````text
+GET /recommendations?sort_by=cost
+      ↓
+Meals ordered by estimated_cost ascending
+      ↓
+hybrid_score used only as a tiebreaker
+````
+
+### Score Sort (default)
+
+````text
+GET /recommendations (or ?sort_by=score)
+      ↓
+adapt-tier meals first, then fallback-tier
+      ↓
+hybrid_score descending within each tier
+````
+
+### Skill Scoring
+
+````text
+Beginner + Hard meal    → 0.20
+Beginner + Medium meal  → 0.60
+Beginner + Easy meal    → 1.00
+Advanced + any meal     → 1.00 (never penalized)
+````
+
+Verified manually against all 20 seeded meals via Swagger; no automated test coverage yet.
+
+---
+
 # 🗃️ Database Migrations
 
 Database schema changes are managed using **Alembic**.
@@ -1922,14 +2065,21 @@ The current database includes the Meal Planner migration:
 create meal plan entries
 ````
 
-and the Favorites migration:
+the Favorites migration:
 
 ````text
 2e7b4adc1b5d
 create favorites table
 ````
 
-The Grocery List feature does **not** require a new migration because the current implementation does not introduce a database model or table. The Week 7 past-slot guard and peso-precision fixes are also migration-free — both are application-layer logic, not schema changes.
+and the Week 7 Physical Activity Level migration:
+
+````text
+aa4a5f458607
+add physical_activity_level to profiles
+````
+
+The Grocery List feature does **not** require a new migration because the current implementation does not introduce a database model or table. The Week 7 past-slot guard, peso-precision, and recommendation-sort/filter fixes are also migration-free — all application-layer logic, no schema changes.
 
 Migration chain:
 
@@ -1939,6 +2089,8 @@ Ingredient Substitutions
 Meal Plan Entries
         ↓
 Favorites
+        ↓
+Physical Activity Level (Week 7)
 ````
 
 ---
@@ -1997,6 +2149,12 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 
 Never commit `.env` or Supabase secrets to the repository.
 
+Run pending migrations after cloning, since the Week 7 `physical_activity_level` column won't exist on a fresh database until you do:
+
+````bash
+alembic upgrade head
+````
+
 ---
 
 # ▶️ Running the Server
@@ -2038,46 +2196,51 @@ Swagger UI can be used to inspect and manually test API endpoints.
 The current backend implementation includes:
 
 ````text
-Authentication                  ✅
-Supabase JWT Verification       ✅
-Profile Management              ✅
-Profile Image Upload            ✅
-Food Allergies                  ✅
-Disliked Ingredients            ✅
-Meals                            ✅
-Meal Ingredients                 ✅
-Meal Instructions                ✅
-Ingredient Suggestions           ✅
-Pantry Management                ✅
-Pantry Quantity Handling         ✅
-Ingredient Substitutions         ✅
-Recommendation Rules             ✅
-Recommendation Scoring           ✅
-Ingredient Availability          ✅
-TF-IDF Ingredient Coverage       ✅
-Recommendation API               ✅
-Meal Planner                     ✅
-Meal Plan CRUD                   ✅
-Meal Plan Authentication         ✅
-Meal Plan User Isolation         ✅
-Meal Plan Past-Slot Guard        ✅
-Peso Precision (Weekly Total)    ✅
-Grocery List                     ✅
-Grocery List Aggregation         ✅
-Grocery List Pantry Comparison   ✅
-Grocery List Unit Safety         ✅
-Grocery List Date Range          ✅
-Grocery List Authentication      ✅
-Grocery List User Isolation      ✅
-Favorites                        ✅
-Favorites CRUD (Add/List/Remove) ✅
-Favorites Idempotency            ✅
-Favorites Authentication         ✅
-Favorites User Isolation         ✅
-Alembic Migrations               ✅
+Authentication                        ✅
+Supabase JWT Verification             ✅
+Profile Management                    ✅
+Profile Image Upload                  ✅
+Physical Activity Level               ✅
+Food Allergies                        ✅
+Disliked Ingredients                  ✅
+Meals                                  ✅
+Meal Ingredients                       ✅
+Meal Instructions                      ✅
+Meal Servings Normalization (1-serv)   🔲 Not yet done — sample data
+Ingredient Suggestions                 ✅
+Pantry Management                      ✅
+Pantry Quantity Handling               ✅
+Ingredient Substitutions               ✅
+Recommendation Rules                   ✅
+Recommendation Scoring                 ✅
+Recommendation Affordability Filter    ✅
+Recommendation Cost-Based Sort         ✅
+Cooking Skill Scoring (manually verified) ✅
+Ingredient Availability                ✅
+TF-IDF Ingredient Coverage             ✅
+Recommendation API                     ✅
+Meal Planner                           ✅
+Meal Plan CRUD                         ✅
+Meal Plan Authentication               ✅
+Meal Plan User Isolation               ✅
+Meal Plan Past-Slot Guard              ✅
+Peso Precision (Weekly Total)          ✅
+Grocery List                           ✅
+Grocery List Aggregation               ✅
+Grocery List Pantry Comparison         ✅
+Grocery List Unit Safety               ✅
+Grocery List Date Range                ✅
+Grocery List Authentication            ✅
+Grocery List User Isolation            ✅
+Favorites                              ✅
+Favorites CRUD (Add/List/Remove)       ✅
+Favorites Idempotency                  ✅
+Favorites Authentication               ✅
+Favorites User Isolation               ✅
+Alembic Migrations                     ✅
 ````
 
-The backend currently provides the core API and database functionality required by the TipidMeal application.
+The backend currently provides the core API and database functionality required by the TipidMeal application. Week 7's Meal Servings normalization (Part 5 / Day 4) is the one item from the Week 7 plan not yet implemented — current seed data remains sample data, not yet corrected to a 1-serving baseline.
 
 ---
 
@@ -2101,6 +2264,8 @@ Business Rules
 TF-IDF Ingredient Coverage
 +
 Weighted Scoring
++
+Affordability Hard Filter (Week 7)
 ````
 
 This approach provides predictable and explainable recommendations.
