@@ -7,6 +7,7 @@ from features.recommendations.router import router as recommendation_router
 from features.meal_planner.router import router as meal_planner_router
 from features.grocery_list.router import router as grocery_list_router
 from features.favorites.router import router as favorites_router
+from features.nutrition.router import router as nutrition_router
 
 
 api_router = APIRouter()
@@ -38,4 +39,8 @@ api_router.include_router(
 
 api_router.include_router(
     favorites_router,
+)
+
+api_router.include_router(
+    nutrition_router,
 )

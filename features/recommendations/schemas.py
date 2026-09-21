@@ -1,5 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 from features.meals.schemas import MealResponse
+from features.nutrition.schemas import NutritionAdequacyResponse
 
 
 class IngredientAdaptationResponse(BaseModel):
@@ -28,6 +29,8 @@ class RecommendationResponse(BaseModel):
     hybrid_score: float
 
     adaptation: MealAdaptationResponse
+
+    nutrition: NutritionAdequacyResponse
 
 
 class RecommendationListResponse(BaseModel):

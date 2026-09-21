@@ -16,6 +16,7 @@ from features.recommendations.scoring import (
     calculate_hybrid_score,
 )
 from features.profiles.models.profile import Profile
+from features.nutrition.service import compute_nutritional_adequacy
 
 
 def get_recommendation_data(db: Session, profile_id):
@@ -167,6 +168,11 @@ def calculate_meal_coverage(
             disliked_score,
         )
 
+        # 10. Nutritional adequacy — computed against this same
+        #     profile, so the recommendation card can show a
+        #     "nutritionally balanced" badge without a second call.
+        nutrition = compute_nutritional_adequacy(db, meal, profile)
+
         recommendations.append(
             {
                 "meal": meal,
@@ -177,6 +183,7 @@ def calculate_meal_coverage(
                 "disliked_score": disliked_score,
                 "hybrid_score": hybrid_score,
                 "adaptation": adaptation,
+                "nutrition": nutrition,
             }
         )
 

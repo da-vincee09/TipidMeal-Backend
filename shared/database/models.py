@@ -4,6 +4,7 @@ from features.meals.models import Meal
 from features.recommendations.models import IngredientSubstitution
 from features.meal_planner.models import MealPlanEntry
 from features.favorites.models import Favorite
+from features.nutrition.models import IngredientFoodGroup
 
 __all__ = [
     "Profile",
@@ -12,4 +13,5 @@ __all__ = [
     "IngredientSubstitution",
     "MealPlanEntry",
     "Favorite",
+    "IngredientFoodGroup",
 ]

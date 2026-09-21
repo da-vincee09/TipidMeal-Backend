@@ -1,8 +1,10 @@
 # TipidMeal Backend
 
-Backend API for **TipidMeal**, a mobile application that helps users discover affordable, personalized meals based on their budget, cooking skills, dietary restrictions, ingredient preferences, pantry availability, meal-planning needs, grocery requirements, and saved favorites.
+Backend API for **TipidMeal**, a mobile application that helps users discover affordable, personalized meals based on their budget, cooking skills, dietary restrictions, ingredient preferences, pantry availability, meal-planning needs, grocery requirements, saved favorites, and nutritional adequacy against Philippine dietary standards.
 
 Built with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL (Supabase)**, **Supabase Auth**, and **Alembic**.
+
+> **Project status:** 🚧 In Development — **Week 8 (Nutrition) built and evaluated; results pending final data verification** (see the Known gap under Meals and "Nutrition Methodology & Limitations").
 
 ---
 
@@ -97,14 +99,27 @@ backend/
 │   │   ├── service.py
 │   │   └── router.py
 │   │
-│   └── favorites/
+│   ├── favorites/
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   └── favorite.py
+│   │   ├── schemas.py
+│   │   ├── repository.py
+│   │   ├── service.py
+│   │   └── router.py
+│   │
+│   └── nutrition/
 │       ├── models/
-│       │   ├── __init__.py
-│       │   └── favorite.py
+│       │   └── ingredient_food_group.py
+│       ├── constants.py
 │       ├── schemas.py
-│       ├── repository.py
 │       ├── service.py
 │       └── router.py
+│
+├── scripts/
+│   ├── __init__.py
+│   ├── evaluate_nutrition_adequacy.py
+│   └── debug_food_group_exclusions.py
 │
 ├── shared/
 │   ├── auth/
@@ -180,6 +195,20 @@ Favorite Model
 PostgreSQL
 ````
 
+Nutrition (Week 8) is also a **computed feature**. Nothing about a meal's adequacy is stored; it is calculated on request from the meal, the caller's profile, and a small static/reference data layer:
+
+````text
+Router
+   ↓
+Nutrition Service
+   ↓
+Meal + Profile + ingredient_food_groups (reference table)
+   +
+features/nutrition/constants.py (PDRI, PAL, Pinggang Pinoy, conversions)
+   ↓
+Computed Nutritional Adequacy
+````
+
 Each major feature is isolated inside its own module.
 
 Current backend modules:
@@ -192,9 +221,10 @@ Recommendations
 Meal Planner
 Grocery List
 Favorites
+Nutrition
 ````
 
-Shared functionality such as authentication, database configuration, storage, and common schemas is placed inside `shared/`. App-wide constants (e.g. timezone-sensitive cutoffs) live in `core/constants.py`, with small pure helper functions in `core/utils.py`.
+Shared functionality such as authentication, database configuration, storage, and common schemas is placed inside `shared/`. App-wide constants (e.g. timezone-sensitive cutoffs) live in `core/constants.py`, with small pure helper functions in `core/utils.py`. Nutrition's static reference data lives with the feature in `features/nutrition/constants.py`.
 
 ---
 
@@ -279,7 +309,7 @@ Profile
        └── Disliked Ingredients
 ````
 
-The profile data is used by the recommendation system to personalize meal recommendations.
+The profile data is used by the recommendation system to personalize meal recommendations, and (as of Week 8) by the Nutrition module to determine each user's daily caloric requirement.
 
 ## Physical Activity Level (Week 7)
 
@@ -289,7 +319,7 @@ A `physical_activity_level` column was added to `Profile` as groundwork for Week
 - **Required on profile creation.** `ProfileCreate.physical_activity_level` has no default and is not `Optional` — every new profile must specify it. This is a deliberate product decision made during implementation.
 - The database column itself is nullable (`String(50)`, `nullable=True`) purely so pre-existing profiles created before this migration don't violate a NOT NULL constraint retroactively — but the API enforces it as required for any newly-created profile going forward. `ProfileUpdate` and `ProfileResponse` keep it optional so partial updates and pre-Week-7 rows still round-trip correctly.
 - Migration: `aa4a5f458607_add_physical_activity_level_to_profiles.py`.
-- **Not currently used anywhere in recommendation scoring** — the hybrid score is unchanged (Coverage/Budget/Skill/Allergy/Disliked, see Recommendation Scoring below). This field exists solely to support Week 8's calorie-need calculation.
+- **Used by the Nutrition module (Week 8)** to scale the PDRI energy requirement for activity level (see Nutrition Module below). It is **not** used in recommendation scoring — the hybrid score is unchanged (Coverage/Budget/Skill/Allergy/Disliked, see Recommendation Scoring below).
 
 ---
 
@@ -437,7 +467,9 @@ Implemented:
 
 `Meal.difficulty` is a free `String(50)` with no enum constraint at the database level. The recommendation engine's skill-scoring table (see Recommendation Scoring below) expects exactly `easy`, `medium`, or `hard` (case-insensitive); any other value would score `0.0` regardless of the user's skill level, since it wouldn't match a key in the compatibility table. All 20 currently seeded meals were checked and confirmed to use exactly one of these three values (Week 7, Day 3).
 
-> ⚠️ **Known gap (Week 7, not yet done):** `Meal.servings` and the associated ingredient quantities/cost/calories in the current seed data are **sample data** and have not yet been normalized to represent exactly 1 serving. This is Week 7 Part 5 / Day 4 and is still outstanding.
+`Meal.calories` feeds the Nutrition module's caloric-adequacy check (Week 8), where it is compared against a per-meal bracket. It therefore needs to represent calories for **one serving** of the dish.
+
+> ⚠️ **Known gap (Week 7, Day 4 — not yet done):** `Meal.servings` and the associated ingredient quantities/cost/calories in the current seed data are **sample data** and have not yet been normalized to represent exactly 1 serving. Because the Nutrition caloric check depends on `Meal.calories`, the nutritional-adequacy figures should be treated as provisional until this is done.
 
 ---
 
@@ -513,6 +545,8 @@ Recommendations consider:
 * Food allergies
 * Disliked ingredients
 * Ingredient coverage
+
+**Week 8:** the recommendation response is also extended with each meal's nutritional-adequacy result (see Nutrition Module below), so the Flutter client can show a nutrition badge on recommendation cards. This is informational — the hybrid score weights and the ranking rules below are unchanged.
 
 ## Affordability (Week 7 — hard filter)
 
@@ -1241,6 +1275,184 @@ PostgreSQL
 
 ---
 
+# 🥗 Nutrition Module (Week 8)
+
+The Nutrition module answers one question for a given user and meal: **is this meal nutritionally adequate for this user?** It supports the thesis's Objective 4 (assessing the nutritional adequacy of recommended meals).
+
+A meal is nutritionally adequate only when **both** checks pass:
+
+````text
+Caloric adequacy   — the meal's calories fall inside the user's per-meal bracket
+        +
+Food-group adequacy — the meal's Grow/Glow balance falls inside the Pinggang Pinoy bands
+        ↓
+Nutritional adequacy
+````
+
+Like the Grocery List, Nutrition is a **computed feature**: results are calculated on request and are not persisted. The one table it adds, `ingredient_food_groups`, is reference data, not user data.
+
+Nutrition flow:
+
+````text
+Authenticated User
+       ↓
+Profile (date of birth, sex, physical activity level)
+       ↓
+Daily Caloric Requirement (PDRI x activity scaling)
+       ↓
+Per-Meal Caloric Bracket (ulam-scaled, ±20%)
+       +
+Meal
+       ├── Calories → Caloric Adequacy
+       └── Ingredients → grams → Go/Grow/Glow proportions → Food-Group Adequacy
+       ↓
+Nutritional Adequacy
+````
+
+## Standards Used
+
+Two external standards are combined. That combination is a methodological choice, not a single official table, and must be documented as such in the thesis methodology chapter with both sources cited separately:
+
+1. **PDRI 2015 (Revised September 2018), FNRI-DOST** — Recommended Energy Intake by sex and age bracket. PDRI gives one value per sex/age and does not stratify by physical activity.
+2. **FAO/WHO/UNU (2001), *Human Energy Requirements*, Table 5.3** — Physical Activity Level (PAL) categories, used as ratios to scale the PDRI value for activity level, anchored on `moderately_active` = the PDRI value as-is.
+
+Food-group targets come from **FNRI-DOST Pinggang Pinoy (2016)**.
+
+## Daily Caloric Requirement
+
+`get_daily_caloric_requirement(date_of_birth, sex, physical_activity_level)` returns the profile's daily kcal need:
+
+````text
+daily_kcal = round(PDRI value for (sex, age bracket) x activity scale factor)
+````
+
+PDRI baseline (kcal/day, at `moderately_active`):
+
+| Sex    | 19–29 | 30–49 | 50–59 | 60–69 | 70+  |
+|--------|------:|------:|------:|------:|-----:|
+| Male   | 2530  | 2420  | 2420  | 2140  | 1960 |
+| Female | 1930  | 1870  | 1870  | 1610  | 1540 |
+
+Activity scale factors (PAL midpoint ÷ 1.85):
+
+| Activity level      | PAL midpoint | Scale factor |
+|---------------------|-------------:|-------------:|
+| `sedentary`         | 1.55         | ≈ 0.838      |
+| `moderately_active` | 1.85         | 1.000        |
+| `active`            | 2.20         | ≈ 1.189      |
+
+Handling of edge cases (each returns an explicit result status rather than raising or silently defaulting):
+
+- **Activity level not set** → `activity_not_set`.
+- **Sex other than male/female** (e.g. "Prefer not to say") → `sex_not_supported`, because the PDRI table only has male/female columns.
+- **Age below 19** → clamped to the 19–29 bracket as a documented fallback (no adult PDRI bracket exists below 19). Flag for adviser review if pediatric handling matters later.
+
+## Per-Meal Caloric Adequacy
+
+````text
+full-meal target = daily_kcal / 3                  (MEALS_PER_DAY = 3)
+ulam target      = full-meal target x 0.67          (ULAM_ENERGY_SHARE)
+bracket          = ulam target x (1 ± 0.20)         (PER_MEAL_TOLERANCE = ±20%)
+````
+
+`meal.calories` is then classified as `below`, `within`, or `above` the bracket, or `unavailable` (see Unavailable States). Example: a male aged 19–29, moderately active (2530 kcal/day) has a bracket of about **452–678 kcal** per dish.
+
+## Ulam-Only Scaling (methodology choice)
+
+Seeded meals are **ulam/viand dishes**; rice and other Go-group staples are modeled as their own separate meals (e.g. Garlic Fried Rice). Both the calorie target and the Pinggang Pinoy bands describe a *whole plate* (staple + ulam), so applying them directly to a single dish would compare an ulam against a plate-sized target. Three app-specific reconciliations address this:
+
+- **`ULAM_ENERGY_SHARE` = 1 − midpoint of the Go band (23–43% → 33%) = 0.67.** The ulam is expected to carry the non-Go share of a meal's energy; the caloric bracket is scaled by it.
+- **`ULAM_FOOD_GROUP_TARGETS`.** Go is excluded from the food-group check, and the Grow and Glow bands are divided by the same 0.67, judged as shares of the Grow+Glow total.
+- **`STAPLE_MEAL_NAMES`** (currently Garlic Fried Rice). Staples are not judged as an ulam: they report `is_staple: true`, `caloric_adequacy: "unavailable"`, and no adequacy verdict, instead of a false fail.
+
+These are **not official PDRI or Pinggang Pinoy figures** and must be presented as the app's own reconciliation in the methodology chapter.
+
+## Food-Group Adequacy
+
+Each meal's ingredients are classified into Pinggang Pinoy groups and weighed:
+
+1. **Classification.** The `ingredient_food_groups` table maps each ingredient name (lowercased, trimmed) to `go`, `grow`, `glow`, or `other`. `other` (condiments, seasonings, fats, liquids, sauces) never enters the calculation.
+2. **Mass.** Ingredients stored in `g`/`kg` are used directly. Piece- or cup-based ingredients are converted with `INGREDIENT_GRAM_CONVERSIONS` in `features/nutrition/constants.py` (reference weights from USDA and standard culinary conversions, e.g. medium tomato 123 g, medium potato 213 g, 5" sweet potato 130 g, 7" daikon/labanos 338 g, quail egg 9 g).
+3. **Proportions.** Grams are summed per group and reported as percentages of the classified total: `{"go": %, "grow": %, "glow": %}`. An ingredient with no classification, or with no gram conversion for its unit, is **excluded from that meal's proportions** rather than guessed.
+4. **Verdict (ulam-only).** Go is ignored; Grow and Glow are renormalized to shares of the Grow+Glow total and checked against the ulam bands:
+
+   | Group | Plate-level band (Pinggang Pinoy) | Ulam-only band (÷ 0.67) |
+   |-------|-----------------------------------|--------------------------|
+   | Go    | 23–43%                            | not scored               |
+   | Grow  | 7–27%                             | ≈ 10.4–40.3%             |
+   | Glow  | 40–60%                            | ≈ 59.7–89.6%             |
+
+   Because the two shares sum to 100%, the Grow and Glow bands mirror each other. Boundaries are inclusive.
+
+`food_group_proportions` returns the meal's raw three-group split (including Go) for display; the verdict is derived from the ulam-only shares.
+
+## Unavailable States
+
+Adequacy is `None`/`unavailable` — never a silent `false` — when the computation can't be made:
+
+- Physical activity level not set, or a sex value with no PDRI row (caloric side).
+- The meal has no `calories` value.
+- The meal has no classifiable, measurable ingredients (`food_group_proportions` is `null`), or has no Grow/Glow content to assess.
+- The meal is a staple (`is_staple: true`).
+
+`nutritionally_adequate` is `null` whenever either half is unavailable.
+
+## Endpoint and Response
+
+````text
+GET /api/v1/meals/{meal_id}/nutrition-adequacy
+````
+
+Requires authentication; the result is computed for the authenticated user's own profile. Returns `404` if the meal or the profile does not exist.
+
+Example response:
+
+````json
+{
+  "caloric_adequacy": "within",
+  "food_group_proportions": { "go": 0.0, "grow": 34.6, "glow": 65.4 },
+  "food_group_adequate": true,
+  "nutritionally_adequate": true,
+  "is_staple": false
+}
+````
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `caloric_adequacy` | `within` \| `below` \| `above` \| `unavailable` | Meal calories vs. the per-meal bracket |
+| `food_group_proportions` | object \| null | Raw Go/Grow/Glow percentages by mass |
+| `food_group_adequate` | bool \| null | Ulam-only Grow/Glow verdict |
+| `nutritionally_adequate` | bool \| null | `within` **and** food groups adequate; `null` if either half is unavailable |
+| `is_staple` | bool | Staple meal, not judged as an ulam (defaults to `false`) |
+
+## Ingredient Food Groups (reference table)
+
+`ingredient_food_groups` maps ingredient names to a Pinggang Pinoy group.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID | Primary key |
+| `ingredient_name` | String(100) | Unique, indexed; lowercase |
+| `food_group` | String(20) | `go`, `grow`, `glow`, or `other` |
+
+It is created and seeded by migration `b1c2d3e4f5a6`, and extended by `c2d3e4f5a6b7` (ingredients found by the diagnostic script that had no classification). All ingredients used by the 20 seeded meals are now classified. **When adding a meal or ingredient, add a matching row (new migration) — an unclassified ingredient is silently dropped from that meal's proportions.** `scripts/debug_food_group_exclusions.py` lists every dropped ingredient.
+
+Nutrition architecture:
+
+````text
+Authenticated User
+       ↓
+Profile ── Meal
+       ↓
+Nutrition Service
+       ↓
+constants.py + ingredient_food_groups
+       ↓
+Computed Adequacy (nothing persisted)
+````
+
+---
+
 # 📡 API Endpoints
 
 All API routes are versioned under:
@@ -1284,11 +1496,21 @@ All API routes are versioned under:
 
 ---
 
+## Nutrition
+
+| Method | Endpoint                                     | Description                                                  |
+| ------ | ---------------------------------------------- | -------------------------------------------------------------- |
+| GET    | `/api/v1/meals/{meal_id}/nutrition-adequacy` | Nutritional adequacy of a meal for the authenticated user's profile |
+
+The Nutrition endpoint is protected using the authenticated Supabase user.
+
+---
+
 ## Recommendations
 
 | Method | Endpoint                                | Description                                |
 | ------ | ----------------------------------------- | -------------------------------------------- |
-| GET    | `/api/v1/recommendations`               | Generate personalized meal recommendations (default `sort_by=score`) |
+| GET    | `/api/v1/recommendations`               | Generate personalized meal recommendations (default `sort_by=score`; includes each meal's nutrition result) |
 | GET    | `/api/v1/recommendations?sort_by=cost`  | Same, ordered by estimated cost ascending  |
 
 ---
@@ -1390,6 +1612,8 @@ Their Pantry
 ````
 
 A user cannot use another user's profile identifier to retrieve another user's grocery requirements, meal plan, or favorites.
+
+The Nutrition endpoint always uses the authenticated user's own profile (date of birth, sex, activity level); there is no way to request adequacy for another user's profile.
 
 ---
 
@@ -1496,11 +1720,11 @@ ingredient_substitutions
 meal_plan_entries
 
 favorites
+
+ingredient_food_groups   (reference data, Week 8)
 ````
 
-There is currently **no `grocery_list_items` table**.
-
-The Grocery List is computed dynamically from existing data.
+There is currently **no `grocery_list_items` table**, and nutrition results are not stored — both are computed dynamically from existing data. `ingredient_food_groups` is a standalone reference table with no foreign keys.
 
 Main relationships:
 
@@ -1529,6 +1753,18 @@ Meal Ingredients
 Pantry Items
         ↓
 Computed Grocery List
+````
+
+Derived Nutritional Adequacy:
+
+````text
+Profile
+   +
+Meal (calories, ingredients)
+   +
+ingredient_food_groups
+        ↓
+Computed Nutritional Adequacy
 ````
 
 Foreign keys and cascading behavior are defined at the database level where appropriate.
@@ -1591,7 +1827,7 @@ Hybrid Score
       ↓
 Ranking / Sort (score or cost — Week 7)
       ↓
-Recommended Meals
+Recommended Meals (+ nutrition result, Week 8)
 ````
 
 ---
@@ -1682,6 +1918,31 @@ Favorites are scoped to the authenticated user's profile, and provide a lightwei
 
 ---
 
+# 🥗 Nutrition Data Flow (Week 8)
+
+````text
+Supabase Auth
+      ↓
+Authenticated User
+      ↓
+Profile ─────────────── Meal
+  │                       │
+  │ DOB, sex, activity    ├── calories
+  ↓                       └── ingredients
+PDRI x PAL scaling              │
+  ↓                              ↓
+Daily kcal                 ingredient_food_groups + gram conversions
+  ↓                              ↓
+Per-meal ulam bracket      Go / Grow / Glow proportions
+  ↓                              ↓
+Caloric adequacy           Food-group adequacy (ulam-only)
+  └──────────┬───────────────────┘
+             ↓
+   Nutritional adequacy (both must pass)
+````
+
+---
+
 # 🧪 Backend Testing and Validation
 
 Backend modules can be independently imported and validated before integration testing.
@@ -1762,6 +2023,28 @@ python -c "from features.recommendations.scoring import calculate_budget_score, 
 python -c "from features.recommendations.router import router; print('Recommendations router OK')"
 ````
 
+Nutrition validation:
+
+````bash
+python -c "from features.nutrition.constants import get_daily_caloric_requirement, get_per_meal_bracket, ULAM_FOOD_GROUP_TARGETS, STAPLE_MEAL_NAMES; print('Nutrition constants OK')"
+````
+
+````bash
+python -c "from features.nutrition.models.ingredient_food_group import IngredientFoodGroup; print(IngredientFoodGroup.__tablename__)"
+````
+
+````bash
+python -c "from features.nutrition.schemas import NutritionAdequacyResponse; print('Nutrition schemas OK')"
+````
+
+````bash
+python -c "from features.nutrition.service import compute_nutritional_adequacy; print('Nutrition service OK')"
+````
+
+````bash
+python -c "from features.nutrition.router import router; print('Nutrition router OK')"
+````
+
 Profiles validation:
 
 ````bash
@@ -1778,7 +2061,7 @@ The complete FastAPI application can be verified with:
 python -c "from app.main import app; print('FastAPI app OK')"
 ````
 
-> **Note:** No automated unit tests currently exist for `scoring.py` or the recommendation pipeline (Week 7). Skill scoring, cost sort, and the affordability filter have all been verified manually through Swagger and the running app, against the 20 seeded meals, rather than with `pytest`.
+> **Note:** No automated unit tests currently exist for `scoring.py`, the recommendation pipeline, or the Nutrition module (Weeks 7–8). Skill scoring, cost sort, the affordability filter, and nutritional adequacy have been verified manually through Swagger, hand calculations, and the running app, against the 20 seeded meals, rather than with `pytest`.
 
 ---
 
@@ -2034,6 +2317,117 @@ Verified manually against all 20 seeded meals via Swagger; no automated test cov
 
 ---
 
+# 🧪 Nutrition Validation (Week 8)
+
+The Nutrition module should be tested against the following scenarios.
+
+### Daily Caloric Requirement
+
+````text
+Male, 19-29, moderately_active   → 2530 kcal/day
+Female, 30-49, sedentary         → round(1870 x 1.55/1.85) = 1567 kcal/day
+Male, 19-29, active              → round(2530 x 2.20/1.85) = 3009 kcal/day
+````
+
+### Per-Meal Bracket
+
+````text
+Male, 19-29, moderately_active (2530 kcal/day)
+      ↓
+2530 / 3 = 843.3  →  x 0.67 = 565.0
+      ↓
+Bracket: 452.0 - 678.0 kcal
+````
+
+### Caloric Adequacy
+
+````text
+meal.calories < 452   → "below"
+452 <= calories <= 678 → "within"
+meal.calories > 678   → "above"
+````
+
+### Food-Group Adequacy (ulam-only)
+
+````text
+Sinigang na Baboy   500 g grow, 944 g glow  → grow share 34.6%  → adequate
+Beef Tapa           500 g grow, 0 g glow    → grow share 100%   → not adequate
+````
+
+### Unavailable / Edge Cases
+
+````text
+physical_activity_level not set  → caloric_adequacy "unavailable", nutritionally_adequate null
+sex not male/female              → caloric_adequacy "unavailable"
+age under 19                     → clamped to the 19-29 bracket
+Garlic Fried Rice (staple)       → is_staple true, caloric "unavailable", nutritionally_adequate null
+meal with no classifiable ingredients → food_group_proportions null, nutritionally_adequate null
+````
+
+### Missing Meal or Profile
+
+````text
+GET /meals/{unknown_id}/nutrition-adequacy → 404 "Meal not found"
+Authenticated user without a profile       → 404 "Profile not found"
+````
+
+---
+
+# 📈 Nutrition Evaluation Harness (Objective 4)
+
+`scripts/evaluate_nutrition_adequacy.py` produces the nutritional-adequacy accuracy measure for the thesis results. It calls the real `compute_nutritional_adequacy()` (not a re-implementation), so it tests the production logic.
+
+Test matrix:
+
+````text
+5 PDRI age brackets (19-29, 30-49, 50-59, 60-69, 70+)
+x 2 sexes (male, female)
+x 3 activity levels (sedentary, moderately_active, active)
+= 30 profiles
+
+30 profiles x every seeded meal = one test case per (profile, meal)
+````
+
+Rules:
+
+- **Accuracy** = cases where `nutritionally_adequate` is `true` ÷ evaluable cases.
+- **Evaluable** = `nutritionally_adequate` is not `null`. Staple meals and any structurally unavailable case are excluded from the denominator (reported separately) rather than counted for or against.
+- The report also breaks accuracy down by criterion (calories within/below/above; food groups adequate) and per meal, since the food-group verdict does not vary by profile — only the calorie check does.
+- Output: a printed summary and `nutrition_evaluation_results.csv` (git-ignored; regenerate as needed).
+
+Run from the backend project root, inside the venv:
+
+````bash
+python -m scripts.evaluate_nutrition_adequacy
+````
+
+`scripts/debug_food_group_exclusions.py` is the companion diagnostic. It lists, per meal, which ingredients are counted or dropped and why, and ends with every ingredient still missing a food-group classification or a gram conversion:
+
+````bash
+python -m scripts.debug_food_group_exclusions
+python -m scripts.debug_food_group_exclusions sinigang    # filter by meal name
+````
+
+> **Interpretation caveat:** the accuracy figure depends directly on `Meal.calories` being a per-serving value, which is not yet verified (see the Known gap under Meals). Do not treat the figure as final until the 1-serving normalization is complete and the evaluation is rerun. The methodology (bands, scaling, classification) was fixed before results were inspected and should not be adjusted to raise the percentage.
+
+---
+
+# ⚠️ Nutrition Methodology & Limitations
+
+To be documented in the thesis methodology chapter and reviewed with the adviser:
+
+- **Composite standard.** PDRI energy values scaled by FAO/WHO/UNU PAL ratios is a composite method, not a single official table.
+- **Ulam-only scaling is app-specific.** `ULAM_ENERGY_SHARE` (0.67), the ulam-only Grow/Glow bands, and the staple exclusion are the app's own reconciliation of two whole-plate standards with single-dish meal data.
+- **3 meals per day** is assumed for the per-meal target (`MEALS_PER_DAY`); snacks are not modeled.
+- **Complete one-dish meals.** Dishes that contain their own staple (e.g. Pancit Bihon, Ukoy, Vegetable Lumpia) are judged as ulams with their Go ingredients ignored, which may misjudge them. Scoring such dishes at plate level is a possible refinement.
+- **Ingredient weights are estimates.** Gram conversions for piece/cup units use USDA reference weights and standard culinary conversions; recipe quantities themselves are sample data.
+- **Exact-name classification.** Ingredients are matched to `ingredient_food_groups` by exact lowercase name; an unclassified or unconvertible ingredient is excluded from proportions, not guessed.
+- **Ages below 19** are clamped to the 19–29 PDRI bracket.
+- **Calories are provisional** until Week 7 Day 4 (1-serving normalization) is complete.
+- **No automated unit tests** for the Nutrition module yet; verification is by hand calculation, Swagger, and the evaluation harness.
+
+---
+
 # 🗃️ Database Migrations
 
 Database schema changes are managed using **Alembic**.
@@ -2072,14 +2466,24 @@ the Favorites migration:
 create favorites table
 ````
 
-and the Week 7 Physical Activity Level migration:
+the Week 7 Physical Activity Level migration:
 
 ````text
 aa4a5f458607
 add physical_activity_level to profiles
 ````
 
-The Grocery List feature does **not** require a new migration because the current implementation does not introduce a database model or table. The Week 7 past-slot guard, peso-precision, and recommendation-sort/filter fixes are also migration-free — all application-layer logic, no schema changes.
+and the Week 8 Nutrition migrations:
+
+````text
+b1c2d3e4f5a6
+create ingredient_food_groups (table + initial seed)
+
+c2d3e4f5a6b7
+add missing ingredient_food_groups rows
+````
+
+The Grocery List feature does **not** require a new migration because the current implementation does not introduce a database model or table. The Week 7 past-slot guard, peso-precision, and recommendation-sort/filter fixes are also migration-free — all application-layer logic, no schema changes. Week 8's Nutrition calculations are likewise application-layer; its two migrations only add the `ingredient_food_groups` reference table and its data.
 
 Migration chain:
 
@@ -2091,6 +2495,10 @@ Meal Plan Entries
 Favorites
         ↓
 Physical Activity Level (Week 7)
+        ↓
+Ingredient Food Groups (Week 8)
+        ↓
+Missing Ingredient Food Groups (Week 8)
 ````
 
 ---
@@ -2149,7 +2557,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 
 Never commit `.env` or Supabase secrets to the repository.
 
-Run pending migrations after cloning, since the Week 7 `physical_activity_level` column won't exist on a fresh database until you do:
+Run pending migrations after cloning. A fresh database needs them for the Week 7 `physical_activity_level` column and for the Week 8 `ingredient_food_groups` table and its seed data (without the seed, the Nutrition module classifies no ingredients):
 
 ````bash
 alembic upgrade head
@@ -2237,10 +2645,19 @@ Favorites CRUD (Add/List/Remove)       ✅
 Favorites Idempotency                  ✅
 Favorites Authentication               ✅
 Favorites User Isolation               ✅
+Daily Caloric Requirement (PDRI x PAL) ✅
+Per-Meal Caloric Adequacy              ✅
+Ingredient Food Groups (reference)     ✅
+Food-Group Adequacy (ulam-only)        ✅
+Nutrition Endpoint                     ✅
+Nutrition on Recommendations           ✅
+Nutrition Evaluation Harness           ✅
+Nutrition Results Final                🔲 Pending Day 4 data verification + rerun
+Nutrition Unit Tests                   🔲 Not yet done
 Alembic Migrations                     ✅
 ````
 
-The backend currently provides the core API and database functionality required by the TipidMeal application. Week 7's Meal Servings normalization (Part 5 / Day 4) is the one item from the Week 7 plan not yet implemented — current seed data remains sample data, not yet corrected to a 1-serving baseline.
+The backend currently provides the core API and database functionality required by the TipidMeal application, plus the Week 8 Nutrition module and its evaluation harness. Week 7's Meal Servings normalization (Part 5 / Day 4) is the one item from the Week 7 plan not yet implemented — current seed data remains sample data, not yet corrected to a 1-serving baseline — and the nutritional-adequacy results should be considered final only once it is done and the evaluation is rerun.
 
 ---
 
@@ -2268,7 +2685,7 @@ Weighted Scoring
 Affordability Hard Filter (Week 7)
 ````
 
-This approach provides predictable and explainable recommendations.
+This approach provides predictable and explainable recommendations. The Nutrition module (Week 8) is equally deterministic: every verdict traces back to published Philippine standards and explicit, documented scaling choices.
 
 An external AI API is not required for the current recommendation implementation.
 
@@ -2289,7 +2706,7 @@ The current backend supports the following overall application workflow:
         │                │                │
         │                └────────────────┘
         │                         ↓
-        │                  Recommended Meals
+        │                  Recommended Meals ──→ Nutrition Adequacy
         │                         ↓
         └──────────────→  Meal Planner
                                 ↓
@@ -2319,6 +2736,8 @@ Shop
    ↓
 Cook
 ````
+
+Nutritional adequacy is computed per meal for the authenticated user and shown alongside meals and recommendations; it informs the user's choice but does not alter the Discover → Plan → Shop flow.
 
 ---
 
