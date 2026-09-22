@@ -22,6 +22,8 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from features.ingredients.models.ingredient import Ingredient
+
 from features.meals.models.meal import Meal
 from features.nutrition.constants import (
     ULAM_FOOD_GROUP_TARGETS,
@@ -34,18 +36,20 @@ from features.nutrition.models.ingredient_food_group import IngredientFoodGroup
 from features.profiles.models.profile import Profile
 
 
-def get_ingredient_food_group_map(db: Session) -> dict[str, str]:
-    """
-    Loads the full ingredient_food_groups reference table into a dict.
-    Small table (~45 rows currently) — re-querying per call is fine at
-    this scale; revisit with caching if the ingredient vocabulary grows
-    significantly.
-    """
-    rows = db.query(IngredientFoodGroup).all()
-    return {
-        row.ingredient_name.strip().lower(): row.food_group
-        for row in rows
-    }
+_food_group_map_cache: dict[str, str] | None = None
+
+
+def get_ingredient_food_group_map(db: Session, refresh: bool = False) -> dict[str, str]:
+    """Ingredient name -> food group, loaded once per process."""
+    global _food_group_map_cache
+    if _food_group_map_cache is None or refresh:
+        rows = (
+            db.query(Ingredient.name, IngredientFoodGroup.food_group)
+            .join(IngredientFoodGroup, IngredientFoodGroup.ingredient_id == Ingredient.id)
+            .all()
+        )
+        _food_group_map_cache = {name.strip().lower(): group for name, group in rows}
+    return _food_group_map_cache
 
 
 def compute_caloric_adequacy(meal: Meal, profile: Profile) -> str:

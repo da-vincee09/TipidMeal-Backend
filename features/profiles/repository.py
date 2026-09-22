@@ -19,7 +19,7 @@ def create_profile(
         last_name=profile_data.last_name,
         date_of_birth=profile_data.date_of_birth,
         sex=profile_data.sex,
-        daily_budget=profile_data.daily_budget,
+        budget_per_meal=profile_data.budget_per_meal,
         cooking_skill_level=profile_data.cooking_skill_level,
         physical_activity_level=profile_data.physical_activity_level,
     )

@@ -7,9 +7,10 @@ from features.meals.schemas import (
 )
 from features.meals.models.meal_ingredient import MealIngredient
 from features.meals.models.meal_instruction import MealInstruction
+from features.ingredients.repository import get_or_create_ingredient
+from features.ingredients.models.ingredient import Ingredient
 from decimal import Decimal
 from sqlalchemy import select
-from features.meals.models.meal_ingredient import MealIngredient
 
 
 def create_meal(
@@ -43,9 +44,11 @@ def create_meal_ingredient(
     unit: str,
     is_optional: bool,
 ) -> MealIngredient:
+    ingredient_row = get_or_create_ingredient(db, ingredient)
+
     meal_ingredient = MealIngredient(
         meal_id=meal_id,
-        ingredient=ingredient,
+        ingredient_id=ingredient_row.id,
         quantity=quantity,
         unit=unit,
         is_optional=is_optional,
@@ -83,7 +86,7 @@ def get_meals(
     return (
         db.query(Meal)
         .options(
-            joinedload(Meal.ingredients),
+            joinedload(Meal.ingredients).joinedload(MealIngredient.ingredient_ref),
             joinedload(Meal.instructions),
         )
         .all()
@@ -95,11 +98,14 @@ def get_ingredient_suggestions(
     search: str,
     limit: int = 10,
 ) -> list[dict]:
+    # Rewritten to join through Ingredient, since ingredient names now
+    # live there, not as a column on MealIngredient.
     stmt = (
-        select(MealIngredient.ingredient, MealIngredient.unit)
-        .where(MealIngredient.ingredient.ilike(f"%{search}%"))
+        select(Ingredient.name, MealIngredient.unit)
+        .join(MealIngredient, MealIngredient.ingredient_id == Ingredient.id)
+        .where(Ingredient.name.ilike(f"%{search}%"))
         .distinct()
-        .order_by(MealIngredient.ingredient)
+        .order_by(Ingredient.name)
     )
     rows = db.execute(stmt).all()
 
@@ -134,7 +140,7 @@ def get_meal_by_id(
     return (
         db.query(Meal)
         .options(
-            joinedload(Meal.ingredients),
+            joinedload(Meal.ingredients).joinedload(MealIngredient.ingredient_ref),
             joinedload(Meal.instructions),
         )
         .filter(

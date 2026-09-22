@@ -22,7 +22,7 @@ class ProfileCreate(BaseModel):
 
     sex: str
 
-    daily_budget: float = Field(
+    budget_per_meal: float = Field(
         gt=0
     )
 
@@ -68,7 +68,7 @@ class ProfileUpdate(BaseModel):
 
     sex: str | None = None
 
-    daily_budget: float | None = Field(
+    budget_per_meal: float | None = Field(
         default=None,
         gt=0
     )
@@ -125,7 +125,7 @@ class ProfileResponse(BaseModel):
     date_of_birth: date
     sex: str
 
-    daily_budget: float
+    budget_per_meal: float
 
     cooking_skill_level: CookingSkillLevel
 

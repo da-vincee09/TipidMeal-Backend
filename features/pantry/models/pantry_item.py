@@ -9,6 +9,7 @@ from decimal import Decimal
 
 if TYPE_CHECKING:
     from ...profiles.models.profile import Profile
+    from features.ingredients.models.ingredient import Ingredient
 
 class PantryItem(Base):
     __tablename__="pantry_items"
@@ -24,9 +25,10 @@ class PantryItem(Base):
         index=True,
     )
 
-    ingredient: Mapped[str] = mapped_column(
-        String(100),
+    ingredient_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("ingredients.id"),
         nullable=False,
+        index=True,
     )
 
     quantity: Mapped[Decimal] = mapped_column(
@@ -43,6 +45,10 @@ class PantryItem(Base):
         back_populates="pantry_items"
     )
 
+    ingredient_ref: Mapped["Ingredient"] = relationship(
+        lazy="joined",
+    )
+
     created_at: Mapped[DateTime] = mapped_column( 
         DateTime(timezone=True), 
         server_default=func.now(), 
@@ -53,3 +59,14 @@ class PantryItem(Base):
         server_default=func.now(), 
         onupdate=func.now(), 
     )
+
+    @property
+    def ingredient(self) -> str:
+        """
+        Compatibility shim — recommendations/service.py's
+        get_available_ingredients() reads .ingredient expecting a plain
+        string. Read-only: updates to ingredient go through
+        repository.update_pantry_item()'s explicit handling, not
+        generic setattr (see that function for why).
+        """
+        return self.ingredient_ref.name

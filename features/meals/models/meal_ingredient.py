@@ -9,6 +9,7 @@ from shared.database.base import Base
 
 if TYPE_CHECKING:
     from .meal import Meal
+    from features.ingredients.models.ingredient import Ingredient
 
 
 class MealIngredient(Base):
@@ -25,9 +26,10 @@ class MealIngredient(Base):
         index=True,
     )
 
-    ingredient: Mapped[str] = mapped_column(
-        String(100),
+    ingredient_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("ingredients.id"),
         nullable=False,
+        index=True,
     )
 
     quantity: Mapped[Decimal] = mapped_column(
@@ -48,3 +50,18 @@ class MealIngredient(Base):
     meal: Mapped["Meal"] = relationship(
         back_populates="ingredients",
     )
+
+    ingredient_ref: Mapped["Ingredient"] = relationship(
+        lazy="joined",  # avoids N+1 queries — every place reading .ingredient
+                         # (the property below) needs this loaded anyway
+    )
+
+    @property
+    def ingredient(self) -> str:
+        """
+        Compatibility shim: every existing call site across recommendations,
+        nutrition, and grocery_list reads `.ingredient` expecting a plain
+        string. This property preserves that contract while the actual
+        storage is now normalized via ingredient_id -> Ingredient.name.
+        """
+        return self.ingredient_ref.name

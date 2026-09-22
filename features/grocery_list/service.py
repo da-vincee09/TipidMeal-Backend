@@ -17,6 +17,9 @@ from features.pantry import (
     repository as pantry_repository,
 )
 
+from features.ingredients.models.ingredient_price import IngredientPrice
+from features.ingredients.models.ingredient import Ingredient
+
 from features.recommendations.utils import (
     normalize_ingredient,
 )
@@ -89,7 +92,29 @@ def get_pantry_quantities(
     return available
 
 
+def get_ingredient_price_map(
+    db: Session,
+) -> dict[tuple[str, str], Decimal]:
+    """
+    (ingredient_name, unit) -> price_per_unit, for every priced
+    ingredient. Small table — re-querying per call is fine at this
+    scale, matching the same approach used by
+    nutrition.get_ingredient_food_group_map().
+    """
+    rows = (
+        db.query(IngredientPrice)
+        .join(Ingredient, IngredientPrice.ingredient_id == Ingredient.id)
+        .all()
+    )
+
+    return {
+        (row.ingredient.name, row.unit.strip().lower()): row.price_per_unit
+        for row in rows
+    }
+
+
 def calculate_grocery_list(
+    db: Session,
     meal_plan_entries,
     pantry_items,
     start_date: date,
@@ -104,7 +129,11 @@ def calculate_grocery_list(
         pantry_items
     )
 
+    price_map = get_ingredient_price_map(db)
+
     items: list[GroceryListItem] = []
+    total_cost = Decimal("0")
+    has_any_priced_item = False
 
     for (
         ingredient,
@@ -124,6 +153,14 @@ def calculate_grocery_list(
         if quantity_to_buy <= Decimal("0"):
             continue
 
+        price_per_unit = price_map.get((ingredient, unit))
+
+        estimated_cost = None
+        if price_per_unit is not None:
+            estimated_cost = (quantity_to_buy * price_per_unit).quantize(Decimal("0.01"))
+            total_cost += estimated_cost
+            has_any_priced_item = True
+
         items.append(
             GroceryListItem(
                 ingredient=ingredient,
@@ -131,6 +168,7 @@ def calculate_grocery_list(
                 required_quantity=required_quantity,
                 pantry_quantity=pantry_quantity,
                 quantity_to_buy=quantity_to_buy,
+                estimated_cost=estimated_cost,
             )
         )
 
@@ -142,6 +180,7 @@ def calculate_grocery_list(
         start_date=start_date,
         end_date=end_date,
         items=items,
+        total_estimated_cost=total_cost.quantize(Decimal("0.01")) if has_any_priced_item else None,
     )
 
 
@@ -169,6 +208,7 @@ def get_grocery_list(
     )
 
     return calculate_grocery_list(
+        db,
         meal_plan_entries,
         pantry_items,
         start_date,

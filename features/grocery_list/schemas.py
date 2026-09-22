@@ -10,9 +10,11 @@ class GroceryListItem(BaseModel):
     required_quantity: Decimal
     pantry_quantity: Decimal
     quantity_to_buy: Decimal
+    estimated_cost: Decimal | None = None
 
 
 class GroceryListResponse(BaseModel):
     start_date: date
     end_date: date
     items: list[GroceryListItem]
+    total_estimated_cost: Decimal | None = None

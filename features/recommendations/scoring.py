@@ -1,12 +1,12 @@
 def calculate_budget_score(
     meal_cost: float,
-    daily_budget: float,
+    budget_per_meal: float,
 ) -> float:
 
-    if daily_budget <= 0:
+    if budget_per_meal <= 0:
         return 0.0
 
-    ratio = meal_cost / daily_budget
+    ratio = meal_cost / budget_per_meal
 
     if ratio <= 0.50:
         return 1.00

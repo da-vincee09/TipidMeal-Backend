@@ -84,7 +84,7 @@ def calculate_meal_coverage(
         # 1. Affordability gate — hard requirement, independent of
         #    pantry match. A meal the user can't afford is never
         #    recommended, no matter how well it adapts from pantry.
-        is_affordable = float(meal.estimated_cost) <= float(profile.daily_budget)
+        is_affordable = float(meal.estimated_cost) <= float(profile.budget_per_meal)
 
         if not is_affordable:
             continue
@@ -134,7 +134,7 @@ def calculate_meal_coverage(
         # 7. Calculate individual scores.
         budget_score = calculate_budget_score(
             float(meal.estimated_cost),
-            float(profile.daily_budget),
+            float(profile.budget_per_meal),
         )
 
         skill_score = calculate_skill_score(

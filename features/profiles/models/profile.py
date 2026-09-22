@@ -69,7 +69,7 @@ class Profile(Base):
         nullable=False
     )
 
-    daily_budget: Mapped[float] = mapped_column(
+    budget_per_meal: Mapped[float] = mapped_column(
         Numeric(10, 2),
         nullable=False
     )
