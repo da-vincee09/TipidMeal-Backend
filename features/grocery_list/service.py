@@ -24,6 +24,8 @@ from features.recommendations.utils import (
     normalize_ingredient,
 )
 
+from features.ingredients.repository import convert_quantity
+
 
 def aggregate_required_ingredients(
     meal_plan_entries,
@@ -144,6 +146,19 @@ def calculate_grocery_list(
             (ingredient, unit),
             Decimal("0"),
         )
+
+        # No exact-unit match in pantry — check whether the pantry
+        # holds this same ingredient under a DIFFERENT, but convertible,
+        # unit (e.g. pantry has "rice: 2 kg", requirement is "rice: 500 g").
+        # Sums across all convertible pantry entries for this ingredient,
+        # since a user might have separate pantry rows in different units.
+        if pantry_quantity == Decimal("0"):
+            for (pantry_ingredient, pantry_unit), pantry_qty in pantry.items():
+                if pantry_ingredient != ingredient or pantry_unit == unit:
+                    continue
+                converted = convert_quantity(db, pantry_qty, pantry_unit, unit)
+                if converted is not None:
+                    pantry_quantity += converted
 
         quantity_to_buy = (
             required_quantity

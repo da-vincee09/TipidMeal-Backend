@@ -4,6 +4,7 @@ from features.profiles.models.food_allergy import FoodAllergy
 from features.profiles.models.disliked_ingredient import DislikedIngredient
 from sqlalchemy.orm import Session, joinedload
 from features.profiles.schemas import ProfileCreate, ProfileUpdate
+from features.ingredients.repository import get_or_create_ingredient
 
 
 def create_profile(
@@ -35,11 +36,12 @@ def create_profile(
             )
         )
 
-    for ingredient in profile_data.disliked_ingredients:
+    for ingredient_name in profile_data.disliked_ingredients:
+        ingredient = get_or_create_ingredient(db, ingredient_name)
         db.add(
             DislikedIngredient(
                 profile_id=profile.id,
-                ingredient=ingredient
+                ingredient_id=ingredient.id,
             )
         )
 
@@ -114,11 +116,12 @@ def update_profile(
             synchronize_session=False
         )
 
-        for ingredient in disliked_ingredients:
+        for ingredient_name in disliked_ingredients:
+            ingredient = get_or_create_ingredient(db, ingredient_name)
             db.add(
                 DislikedIngredient(
                     profile_id=profile.id,
-                    ingredient=ingredient
+                    ingredient_id=ingredient.id,
                 )
             )
 

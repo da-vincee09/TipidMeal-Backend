@@ -60,21 +60,27 @@ def calculate_skill_score(
 
 def calculate_allergy_score(
     meal_ingredients: list[str],
-    allergies: list[str],
+    allergy_ingredients: set[str],
 ) -> float:
+    """
+    allergy_ingredients is the EXPANDED set of actual ingredient names
+    the profile is allergic to (already resolved from allergy category
+    names like "Shellfish" via allergen_categories) — not the raw
+    category strings themselves.
+    """
 
     normalized_ingredients = {
         ingredient.strip().lower()
         for ingredient in meal_ingredients
     }
 
-    normalized_allergies = {
-        allergy.strip().lower()
-        for allergy in allergies
+    normalized_allergy_ingredients = {
+        ingredient.strip().lower()
+        for ingredient in allergy_ingredients
     }
 
     if normalized_ingredients.intersection(
-        normalized_allergies
+        normalized_allergy_ingredients
     ):
         return 0.0
 

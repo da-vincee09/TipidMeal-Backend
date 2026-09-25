@@ -1,3 +1,4 @@
+from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 from features.meals.schemas import MealResponse
 from features.nutrition.schemas import NutritionAdequacyResponse
@@ -7,6 +8,9 @@ class IngredientAdaptationResponse(BaseModel):
     ingredient: str
     action: str
     replacement: str | None
+    available_quantity: Decimal | None = None
+    required_quantity: Decimal | None = None
+    unit: str | None = None
 
 
 class MealAdaptationResponse(BaseModel):

@@ -15,6 +15,7 @@ from features.recommendations.scoring import (
     calculate_disliked_ingredient_score,
     calculate_hybrid_score,
 )
+from features.ingredients.repository import expand_allergen_categories
 from features.profiles.models.profile import Profile
 from features.nutrition.service import compute_nutritional_adequacy
 
@@ -74,6 +75,14 @@ def calculate_meal_coverage(
         pantry_items
     )
 
+    # Expand the profile's allergy categories into actual ingredient
+    # names ONCE, outside the loop — this doesn't change per meal, so
+    # no reason to re-query allergen_categories 20+ times per request.
+    allergy_ingredients = expand_allergen_categories(
+        db,
+        [allergy.allergy for allergy in profile.food_allergies],
+    )
+
     engine = MealTfidfEngine()
     engine.fit(meals)
 
@@ -119,19 +128,13 @@ def calculate_meal_coverage(
             for ingredient in meal.ingredients
         ]
 
-        # 5. Get user's allergies.
-        allergies = [
-            allergy.allergy
-            for allergy in profile.food_allergies
-        ]
-
-        # 6. Get user's disliked ingredients.
+        # 5. Get user's disliked ingredients.
         disliked_ingredients = [
             disliked.ingredient
             for disliked in profile.disliked_ingredients
         ]
 
-        # 7. Calculate individual scores.
+        # 6. Calculate individual scores.
         budget_score = calculate_budget_score(
             float(meal.estimated_cost),
             float(profile.budget_per_meal),
@@ -144,7 +147,7 @@ def calculate_meal_coverage(
 
         allergy_score = calculate_allergy_score(
             meal_ingredients,
-            allergies,
+            allergy_ingredients,
         )
 
         disliked_score = (
@@ -154,12 +157,12 @@ def calculate_meal_coverage(
             )
         )
 
-        # 8. Never recommend a meal containing an allergen —
+        # 7. Never recommend a meal containing an allergen —
         #    hard filter, unchanged.
         if allergy_score == 0.0:
             continue
 
-        # 9. Calculate final hybrid score.
+        # 8. Calculate final hybrid score.
         hybrid_score = calculate_hybrid_score(
             float(coverage),
             budget_score,
@@ -168,9 +171,9 @@ def calculate_meal_coverage(
             disliked_score,
         )
 
-        # 10. Nutritional adequacy — computed against this same
-        #     profile, so the recommendation card can show a
-        #     "nutritionally balanced" badge without a second call.
+        # 9. Nutritional adequacy — computed against this same
+        #    profile, so the recommendation card can show a
+        #    "nutritionally balanced" badge without a second call.
         nutrition = compute_nutritional_adequacy(db, meal, profile)
 
         recommendations.append(

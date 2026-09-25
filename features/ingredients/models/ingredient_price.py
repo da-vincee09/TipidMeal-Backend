@@ -2,9 +2,11 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING
-from sqlalchemy import ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import ForeignKey, Numeric, String, UniqueConstraint, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from shared.database.base import Base
+from sqlalchemy.sql import func
+from datetime import datetime
 
 if TYPE_CHECKING:
     from .ingredient import Ingredient
@@ -36,6 +38,17 @@ class IngredientPrice(Base):
 
     ingredient: Mapped["Ingredient"] = relationship(
         lazy="joined",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
     __table_args__ = (
