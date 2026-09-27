@@ -1,5 +1,6 @@
 from uuid import UUID
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+
 from features.profiles.schemas import (
     ProfileCreate,
     ProfileUpdate,
@@ -7,9 +8,7 @@ from features.profiles.schemas import (
 from features.profiles.models.profile import Profile
 from features.profiles.models.food_allergy import FoodAllergy
 from features.profiles.models.disliked_ingredient import DislikedIngredient
-from features.ingredients.models.ingredient import Ingredient
-from sqlalchemy.orm import joinedload
-from fastapi import HTTPException
+from features.ingredients.repository import get_or_create_ingredient
 
 
 def create_profile(
@@ -27,6 +26,7 @@ def create_profile(
         sex=profile_data.sex,
         budget_per_meal=profile_data.budget_per_meal,
         cooking_skill_level=profile_data.cooking_skill_level,
+        physical_activity_level=profile_data.physical_activity_level,
     )
 
     db.add(profile)
@@ -40,21 +40,15 @@ def create_profile(
         db.add(food_allergy)
 
     for ingredient_name in profile_data.disliked_ingredients:
-        ingredient = (
-            db.query(Ingredient)
-            .filter(Ingredient.name == ingredient_name)
-            .first()
-        )
+        # get_or_create_ingredient does a case/whitespace-insensitive
+        # lookup and creates the row if it doesn't exist yet — needed
+        # because this list comes from a hardcoded Flutter checklist
+        # that isn't guaranteed to already exist in `ingredients`.
+        ingredient = get_or_create_ingredient(db, ingredient_name)
 
-        if not ingredient:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Ingredient not found: {ingredient_name}",
-            )
-        
         disliked = DislikedIngredient(
             profile_id=profile.id,
-            ingredient=ingredient.id,
+            ingredient_id=ingredient.id,
         )
         db.add(disliked)
 
@@ -131,17 +125,7 @@ def update_profile(
         )
 
         for ingredient_name in disliked_ingredients:
-            ingredient = (
-                db.query(Ingredient)
-                .filter(Ingredient.name == ingredient_name)
-                .first()
-            )
-
-            if not ingredient:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Ingredient not found: {ingredient_name}",
-                )
+            ingredient = get_or_create_ingredient(db, ingredient_name)
 
             db.add(
                 DislikedIngredient(
