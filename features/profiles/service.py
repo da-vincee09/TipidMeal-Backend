@@ -54,7 +54,7 @@ def create_profile(
         
         disliked = DislikedIngredient(
             profile_id=profile.id,
-            ingredient=ingredient,
+            ingredient=ingredient.id,
         )
         db.add(disliked)
 
