@@ -7,7 +7,9 @@ from features.profiles.schemas import (
 from features.profiles.models.profile import Profile
 from features.profiles.models.food_allergy import FoodAllergy
 from features.profiles.models.disliked_ingredient import DislikedIngredient
+from features.ingredients.models.ingredient import Ingredient
 from sqlalchemy.orm import joinedload
+from fastapi import HTTPException
 
 
 def create_profile(
@@ -37,7 +39,19 @@ def create_profile(
         )
         db.add(food_allergy)
 
-    for ingredient in profile_data.disliked_ingredients:
+    for ingredient_name in profile_data.disliked_ingredients:
+        ingredient = (
+            db.query(Ingredient)
+            .filter(Ingredient.name == ingredient_name)
+            .first()
+        )
+
+        if not ingredient:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ingredient not found: {ingredient_name}",
+            )
+        
         disliked = DislikedIngredient(
             profile_id=profile.id,
             ingredient=ingredient,
@@ -116,11 +130,23 @@ def update_profile(
             synchronize_session=False
         )
 
-        for ingredient in disliked_ingredients:
+        for ingredient_name in disliked_ingredients:
+            ingredient = (
+                db.query(Ingredient)
+                .filter(Ingredient.name == ingredient_name)
+                .first()
+            )
+
+            if not ingredient:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Ingredient not found: {ingredient_name}",
+                )
+
             db.add(
                 DislikedIngredient(
                     profile_id=profile.id,
-                    ingredient=ingredient
+                    ingredient_id=ingredient.id,
                 )
             )
 
